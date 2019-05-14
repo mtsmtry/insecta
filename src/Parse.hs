@@ -54,28 +54,29 @@ precederEq s (Symbol t) = precederEq' $ map getOpe [s, t]
 data Operator = Operator Token Int
 data Expr = IdentExpr String | FuncExpr Token [Expr] | StringExpr String | NumberExpr Int deriving (Show, Eq)
 
-parseExpr:: [Token] -> (Expr, [Token])
-parseExpr ts = parseExpr ts [] [] where--4
+parseExpr2:: State [Token] Expr
+parseExpr2 = parseExpr [] [] where--4
     -- (input tokens, operation stack, expression queue) -> (expression, rest token)
-    parseExpr:: [Token] -> [(Token, Int)] -> [Expr] -> (Expr, [Token])
-    parseExpr [] s q = (head $ makeExpr s q, [])
-    parseExpr all@(x:xs) s q = case x of
+    parseExpr:: [(Token, Int)] -> [Expr] -> State [Token] Expr
+    --parseExpr [] s q = (head $ makeExpr s q, [])
+    parseExpr s q = state $ \all@(x:xs)-> case x of --all@(x:xs)
         Error t m   -> error "Illegal tokens"
-        Number n    -> maybeEnd $ parseExpr xs s (NumberExpr n:q)
-        Ident i     -> maybeEnd $ if xs /= [] && head xs == ParenOpen
-            then parseExpr xs ((x, 1):s) q
-            else parseExpr xs s (IdentExpr i:q)
-        ParenOpen   -> maybeEnd $ parseExpr xs ((x, 2):s) q -- 2 args for end condition
-        ParenClose  -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
+        Number n    -> maybeEnd all $ nextParse s (NumberExpr n:q) xs
+        Ident i     -> maybeEnd all $ if xs /= [] && head xs == ParenOpen
+            then runState (parseExpr ((x, 1):s) q) xs
+            else nextParse s (IdentExpr i:q) xs
+        ParenOpen   -> maybeEnd $ nextParse ((x, 2):s) q xs -- 2 args for end condition
+        ParenClose  -> maybeEnd all $ nextParse rest (makeExpr opes q) xs where
             (opes, _:rest) = span ((/= ParenOpen) . fst) s
-        Comma       -> parseExpr xs rest $ makeExpr opes q where
+        Comma       -> nextParse rest (makeExpr opes q) xs where
             isIdent x    = case x of Ident _ -> True; _ -> False
             incrementArg = apply (isIdent . fst) (fmap (1+))
             (opes, rest) = incrementArg <$> span ((/= ParenOpen) . fst) s
-        Symbol ope  -> parseExpr xs ((x, 2):rest) $ makeExpr opes q where
+        Symbol ope  -> nextParse ((x, 2):rest) (makeExpr opes q) xs where
             (opes, rest) = span (precederEq ope . fst) s
         where
-            maybeEnd a = if sum (map ((-1+) . snd) s) + 1 == length q then (head $ makeExpr s q, all) else a
+            nextParse s q = runState (parseExpr s q)
+            maybeEnd all a = if sum (map ((-1+) . snd) s) + 1 == length q then (head $ makeExpr s q, all) else a
     -- ((operator or function token, argument number), input) -> output
     makeExpr:: [(Token, Int)] -> [Expr] -> [Expr]
     makeExpr [] q = q
