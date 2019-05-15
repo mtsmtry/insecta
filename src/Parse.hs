@@ -50,8 +50,7 @@ precederEq s (Symbol t) = precederEq' $ map getOpe' [s, t]
         precederEq' [(aPre, aLeft), (bPre, bLeft)] = bLeft && ((aLeft && aPre <= bPre) || aPre < bPre)
         getOpe' = fromMaybe (0, True) . getOpe
 
-data Operator = Operator Token Int
-data Expr = IdentExpr String | FuncExpr Token [Expr] | StringExpr String | NumberExpr Int deriving (Show, Eq)
+data Expr = IdentExpr String | FuncExpr Token [Expr] | StringExpr String | NumberExpr Int | Rewrite Rule Expr Expr deriving (Show, Eq)
 
 parseExpr:: State [Token] (Maybe Expr)
 parseExpr = state $ \ts-> parseExpr ts [] [] where--4
@@ -143,48 +142,103 @@ parseParenVarDecs = return (Just id) `expect` parseToken ParenOpen `pand` parseV
 parseProof = parseSequence parseStatement
 
 type VarDec = [(String, Expr)]
-data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] | Define String VarDec Expr deriving (Show)
-parseDecla Just "axiom" = return (Just Axiom)
+data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] 
+    | Define String VarDec Expr | Predicate String String Expr VarDec Expr deriving (Show)
+parseDecla:: Maybe String -> State [Token] (Maybe Decla)
+parseDecla (Just "axiom") = return (Just Axiom)
     `pand` parseParenVarDecs 
-    `expect` parseSymbol "{" 
-    `pand` parseExpr
-    `expect` parseSymbol "}"
+    `expect` parseSymbol "{" `pand` parseExpr `expect` parseSymbol "}"
 
-parseDecla Just "theorem" = return (Just Theorem) 
+parseDecla (Just "theorem") = return (Just Theorem) 
     `pand` parseParenVarDecs 
     `expect` parseSymbol "{" 
     `pand` parseExpr 
-    `expect` parseToken (Ident "proof")
-    `expect` parseSymbol ":"
-    `pand` parseProof
+    `expect` parseToken (Ident "proof") `expect` parseSymbol ":" `pand` parseProof
     `expect` parseSymbol "}"
 
-parseDecla Just "define" = return (Just Define)
+parseDecla (Just "define") = return (Just Define)
     `pand` parseIdent
     `pand` parseParenVarDecs 
-    `expect` parseSymbol "{" 
-    `pand` parseExpr
-    `expect` parseSymbol "}"
+    `expect` parseSymbol "{" `pand` parseExpr `expect` parseSymbol "}"
 
-parseDecla _ = Nothing
+parseDecla (Just "predicate") = return (Just Predicate)
+    `pand` parseIdent
+    `expect` parseSymbol "[" `pand` parseIdent `expect` parseSymbol ":" `pand` parseExpr `expect` parseSymbol "]"
+    `pand` parseParenVarDecs
+    `expect` parseSymbol "{" `pand` parseExpr `expect` parseSymbol "}"
+
+parseDecla _ = return Nothing
+
 parseProgram = parseSequence $ parseIdent >>= parseDecla
 
-addProp (FuncExpr (Symbol "=>") [a, b]) = 
---addDecra (Axiom vars expr) = 
+type Simplicity = [Token]
 
-unify:: Expr -> Expr -> State (M.Map String Expr) Bool 
-unify (IdentExpr var) t = state $ \m-> maybe (True, M.insert var t m) (\x-> (x==t, m)) $ M.lookup var m
-unify (NumberExpr n) (NumberExpr n') = return $ n == n'
-unify (NumberExpr _) _ = return False
-unify (FuncExpr f ax) (FuncExpr f' ax') = (and $ unify' ax ax') (f == f') where
-    and f r = if r then f else return False
-    unify' (e:ex) (e':ex') = unify e e' >>= and (unify' ex ex')
-unify (FuncExpr _ _) _ = return False
+type Rule = (Expr, Expr)
+type RuleMap = M.Map String [Rule] 
+makeStepRule:: Expr -> RuleMap -> RuleMap -> (RuleMap, RuleMap)
+makeStepRule (FuncExpr (Symbol kind) [a@(FuncExpr (Ident f) _), b]) sm im = case kind of
+    ">>=" -> (M.insert f (a, b) sm, im)
+    "->" -> (sm, M.insert f (a, b) im)
+
+unify:: Expr -> Expr -> (Bool, M.Map String Expr)
+unify p t = (runState $ unifym p t) M.empty where
+    unifym:: Expr -> Expr -> State (M.Map String Expr) Bool 
+    unifym (IdentExpr var) t = state $ \m-> maybe (True, M.insert var t m) (\x-> (x==t, m)) $ M.lookup var m
+    unifym (NumberExpr n) (NumberExpr n') = return $ n == n'
+    unifym (NumberExpr _) _ = return False
+    unifym (FuncExpr f ax) (FuncExpr f' ax') = (and $ unifym' ax ax') (f == f') where
+        and f r = if r then f else return False
+        unifym' (e:ex) (e':ex') = unifym e e' >>= and (unifym' ex ex')
+    unifym (FuncExpr _ _) _ = return False
+
+equals:: (Expr, Expr) -> Bool
+equals (Rewrite _ n _, t) = equals (n, t)
+equals (t, Rewrite _ n _) = equals (t, n)
+equals (a, b) = a == b
+
+-- derivate
+type Derivater = (Expr, Expr) -> Maybe Expr
+
+encount:: Eq a => a -> [a] -> (Int, Int)
+encount = encount' (-1, 0) where
+    encount' p _ [] = p
+    encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
+
+applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
+applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g 
+    then case num of
+        0 -> Nothing
+        1 -> maybe Nothing makeExpr $ applyDiff d x where
+            (xs', x:xs) = splitAt idx args
+            makeExpr t = Just $ FuncExpr f ((map fst xs') ++ t:(map fst xs))
+        _ -> d pair
+    else d pair where 
+        args = zip as bs
+        es = fmap equals $ args
+        (idx, num) = encount True es
 
 assign:: M.Map String Expr -> Expr -> Expr
 assign m e@(IdentExpr var) = fromMaybe e $ M.lookup var m
 assign m (FuncExpr f args) = FuncExpr f $ map (assign m) args
 assign m e = e
+
+apply:: Rule -> Expr -> Maybe Expr
+apply (a, b) e = if isMatch then Just $ assign map b else Nothing where (isMatch, map) = unify a e
+
+derviate:: Rule -> Derivater
+derviate (a, b) (ea, eb) = if isMatch && isMatch' then Just $ assign map eb else Nothing where 
+    (isMatch, map) = unify a ea
+    (isMatch', _) = unify b eb
+
+derviateDiff:: Rule -> Derivater
+derviateDiff d = applyDiff $ derviate d
+
+simplify:: RuleMap -> Expr -> Expr
+simplify m e@(FuncExpr h@(Ident f) args) = maybe e' (apply' e) (M.lookup f m) where
+    e' = FuncExpr h $ map (simplify m) args
+    apply' e [] = e
+    apply' e (r:rs) = apply' (apply e r) rs
+--addDecra (Axiom vars expr) = 
 
 getTokenTest line = show token ++ ":" ++ rest where (token, rest) = getToken line
 tokenizeTest line = intercalate "," $ map show $ tokenize line
