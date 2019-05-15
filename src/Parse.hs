@@ -67,7 +67,7 @@ parseExpr = state $ \ts-> parseExpr ts [] [] where--4
         ParenOpen   -> maybeEnd $ parseExpr xs ((x, 2):s) q -- 2 args for end condition
         ParenClose  -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
             (opes, _:rest) = span ((/= ParenOpen) . fst) s
-        Comma       -> parseExpr xs rest $ makeExpr opes q where
+        Comma       -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
             isIdent x    = case x of Ident _ -> True; _ -> False
             incrementArg = apply (isIdent . fst) (fmap (1+))
             (opes, rest) = incrementArg <$> span ((/= ParenOpen) . fst) s
@@ -86,12 +86,6 @@ parseExpr = state $ \ts-> parseExpr ts [] [] where--4
     -- Apply 'f' to a element that satisfy 'cond' for the first time
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
-
-data VarDec = VarDec String Expr deriving (Show)
-data VarDecSet = VarDecSet [String] Expr deriving (Show)
-data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr [Statement] | BlockStm String Expr [Statement] deriving (Show)
-data Proof = Proof [Statement] deriving (Show)
-data Theorem = Theorem Expr Proof deriving (Show)
 
 pand:: State [Token] (Maybe (a->b)) -> State [Token] (Maybe a) -> State [Token] (Maybe b)
 pand f a = f >>= maybe (return Nothing) (\f'-> fmap f' <$> a)
@@ -112,7 +106,6 @@ parseToken x = state $ \case
     all@(t:ts) -> if t == x then (Just x, ts) else (Nothing, all)
 
 parseSymbol x = parseToken (Symbol x)
-parseComma = parseToken Comma
 
 parseIdent = state $ \case
     [] -> (Nothing, [])
@@ -127,10 +120,14 @@ parseSeparated s p = p >>= \case
         Nothing -> return $ Just [x']
     Nothing -> return $ Just []
 
-parseCommaSeparated = parseSeparated parseComma
+parseCommaSeparated = parseSeparated $ parseToken Comma
 
 parseBlock = return (Just id) `expect` parseSymbol "{" `pand` parseSequence parseStatement `expect` parseSymbol "}"
+
+data VarDecSet = VarDecSet [String] Expr deriving (Show)
 parseVarDecSet = return (Just VarDecSet) `pand` parseCommaSeparated parseIdent `expect` parseSymbol ":" `pand` parseExpr
+
+data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr [Statement] | BlockStm String Expr [Statement] deriving (Show)
 parseStatement = parseIdent >>= \case
     Just "step" -> return (Just StepStm) `pand` parseExpr
     Just "impl" -> return (Just ImplStm) `pand` parseExpr
@@ -141,10 +138,39 @@ parseVarDecs:: State [Token] (Maybe [(String, Expr)])
 parseVarDecs = fmap conv (parseCommaSeparated parseVarDecSet) where
     toTuple (VarDecSet ns t) = (ns, repeat t)
     conv = Just . concatMap (uncurry zip) . maybe [] (map toTuple)
+parseParenVarDecs = return (Just id) `expect` parseToken ParenOpen `pand` parseVarDecs `expect` parseToken ParenClose
 
 parseProof = parseSequence parseStatement
 
---parseTheorem = return (Just Theorim) `expect` 
+type VarDec = [(String, Expr)]
+data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] | Define String VarDec Expr deriving (Show)
+parseDecla Just "axiom" = return (Just Axiom)
+    `pand` parseParenVarDecs 
+    `expect` parseSymbol "{" 
+    `pand` parseExpr
+    `expect` parseSymbol "}"
+
+parseDecla Just "theorem" = return (Just Theorem) 
+    `pand` parseParenVarDecs 
+    `expect` parseSymbol "{" 
+    `pand` parseExpr 
+    `expect` parseToken (Ident "proof")
+    `expect` parseSymbol ":"
+    `pand` parseProof
+    `expect` parseSymbol "}"
+
+parseDecla Just "define" = return (Just Define)
+    `pand` parseIdent
+    `pand` parseParenVarDecs 
+    `expect` parseSymbol "{" 
+    `pand` parseExpr
+    `expect` parseSymbol "}"
+
+parseDecla _ = Nothing
+parseProgram = parseSequence $ parseIdent >>= parseDecla
+
+addProp (FuncExpr (Symbol "=>") [a, b]) = 
+--addDecra (Axiom vars expr) = 
 
 unify:: Expr -> Expr -> State (M.Map String Expr) Bool 
 unify (IdentExpr var) t = state $ \m-> maybe (True, M.insert var t m) (\x-> (x==t, m)) $ M.lookup var m
@@ -165,4 +191,4 @@ tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
 
 test x = forever $ getLine >>= (putStrLn . x)
-someFunc = test $ parserTest $ parseCommaSeparated parseVarDecSet
+someFunc = test $ parserTest $ parseVarDecs
