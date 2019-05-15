@@ -93,32 +93,14 @@ parseSymbol x = state $ \(t:ts)-> if t == Symbol x then (Just x, ts) else (Nothi
 parseIdent:: State [Token] (Maybe String)
 parseIdent = state $ \(t:ts)-> case t of Ident i-> (Just i, ts); _-> (Nothing, ts)
 
-pand2 f a = do
-    f' <- f
-    case f' of
-        Nothing -> return Nothing
-        Just x -> do
-            a' <- a
-            return $ maybe Nothing (Just . x) a'
-
-expect2 f a = do
-    f' <- f
-    case f' of
-        Nothing -> return Nothing
-        Just x -> do
-            a' <- a
-            return $ if a' then f' else Nothing  
-
-maybeNothing x = maybe (return Nothing) x
-
 pand:: State [Token] (Maybe (a->b)) -> State [Token] (Maybe a) -> State [Token] (Maybe b)
-pand f a = f >>= maybeNothing (\f'-> a >>= maybeNothing (return . Just . f'))
+pand f a = f >>= maybe (return Nothing) (\f'-> fmap f' <$> a)
 
 expect:: State [Token] (Maybe a) -> State [Token] (Maybe b) -> State [Token] (Maybe a)
-expect f a = f >>= maybeNothing (\f'-> a >>= maybeNothing (const $ return $ Just f'))
+expect f a = f >>= maybe (return Nothing) (\f'-> maybe Nothing (const $ Just f') <$> a)
 
 parseVarDec:: State [Token] (Maybe VarDec)
-parseVarDec = (return $ Just VarDec) `pand` parseIdent `expect` (parseSymbol ":") `pand` parseExpr
+parseVarDec = return (Just VarDec) `pand` parseIdent `expect` parseSymbol ":" `pand` parseExpr
 
 unify:: Expr -> Expr -> State (M.Map String Expr) Bool 
 unify (IdentExpr var) t = state $ \m-> maybe (True, M.insert var t m) (\x-> (x==t, m)) $ M.lookup var m
@@ -131,7 +113,7 @@ unify (FuncExpr _ _) _ = return False
 
 getTokenTest line = show token ++ ":" ++ rest where (token, rest) = getToken line
 tokenizeTest line = intercalate "," $ map show $ tokenize line
-transformTest = (\(a, b)->show a ++ " : " ++ show b) . runState parseExpr . tokenize
+transformTest = show . runState parseExpr . tokenize
 parseVarDecTest = show . runState parseVarDec . tokenize
 
 test x = forever $ getLine >>= (putStrLn . x)
