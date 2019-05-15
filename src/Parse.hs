@@ -54,29 +54,28 @@ precederEq s (Symbol t) = precederEq' $ map getOpe [s, t]
 data Operator = Operator Token Int
 data Expr = IdentExpr String | FuncExpr Token [Expr] | StringExpr String | NumberExpr Int deriving (Show, Eq)
 
-parseExpr2:: State [Token] Expr
-parseExpr2 = parseExpr [] [] where--4
+parseExpr:: State [Token] (Maybe Expr)
+parseExpr = state $ \ts-> parseExpr ts [] [] where--4
     -- (input tokens, operation stack, expression queue) -> (expression, rest token)
-    parseExpr:: [(Token, Int)] -> [Expr] -> State [Token] Expr
-    --parseExpr [] s q = (head $ makeExpr s q, [])
-    parseExpr s q = state $ \all@(x:xs)-> case x of --all@(x:xs)
-        Error t m   -> error "Illegal tokens"
-        Number n    -> maybeEnd all $ nextParse s (NumberExpr n:q) xs
-        Ident i     -> maybeEnd all $ if xs /= [] && head xs == ParenOpen
-            then runState (parseExpr ((x, 1):s) q) xs
-            else nextParse s (IdentExpr i:q) xs
-        ParenOpen   -> maybeEnd $ nextParse ((x, 2):s) q xs -- 2 args for end condition
-        ParenClose  -> maybeEnd all $ nextParse rest (makeExpr opes q) xs where
+    parseExpr:: [Token] -> [(Token, Int)] -> [Expr] -> (Maybe Expr, [Token])
+    parseExpr [] s q = (Just $ head $ makeExpr s q, [])
+    parseExpr all@(x:xs) s q = case x of
+        Error t m   -> (Nothing, all)
+        Number n    -> maybeEnd $ parseExpr xs s (NumberExpr n:q)
+        Ident i     -> maybeEnd $ if xs /= [] && head xs == ParenOpen
+            then parseExpr xs ((x, 1):s) q
+            else parseExpr xs s (IdentExpr i:q)
+        ParenOpen   -> maybeEnd $ parseExpr xs ((x, 2):s) q -- 2 args for end condition
+        ParenClose  -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
             (opes, _:rest) = span ((/= ParenOpen) . fst) s
-        Comma       -> nextParse rest (makeExpr opes q) xs where
+        Comma       -> parseExpr xs rest $ makeExpr opes q where
             isIdent x    = case x of Ident _ -> True; _ -> False
             incrementArg = apply (isIdent . fst) (fmap (1+))
             (opes, rest) = incrementArg <$> span ((/= ParenOpen) . fst) s
-        Symbol ope  -> nextParse ((x, 2):rest) (makeExpr opes q) xs where
+        Symbol ope  -> parseExpr xs ((x, 2):rest) $ makeExpr opes q where
             (opes, rest) = span (precederEq ope . fst) s
         where
-            nextParse s q = runState (parseExpr s q)
-            maybeEnd all a = if sum (map ((-1+) . snd) s) + 1 == length q then (head $ makeExpr s q, all) else a
+            maybeEnd a = if sum (map ((-1+) . snd) s) + 1 == length q then (Just $ head $ makeExpr s q, all) else a
     -- ((operator or function token, argument number), input) -> output
     makeExpr:: [(Token, Int)] -> [Expr] -> [Expr]
     makeExpr [] q = q
@@ -86,8 +85,40 @@ parseExpr2 = parseExpr [] [] where--4
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
 
---parseVarDec:: [Token] -> [Token]
---parseVarDec x:xs =
+data VarDec = VarDec String Expr deriving (Show)
+
+parseSymbol:: String -> State [Token] (Maybe String)
+parseSymbol x = state $ \(t:ts)-> if t == Symbol x then (Just x, ts) else (Nothing, ts)
+
+parseIdent:: State [Token] (Maybe String)
+parseIdent = state $ \(t:ts)-> case t of Ident i-> (Just i, ts); _-> (Nothing, ts)
+
+pand2 f a = do
+    f' <- f
+    case f' of
+        Nothing -> return Nothing
+        Just x -> do
+            a' <- a
+            return $ maybe Nothing (Just . x) a'
+
+expect2 f a = do
+    f' <- f
+    case f' of
+        Nothing -> return Nothing
+        Just x -> do
+            a' <- a
+            return $ if a' then f' else Nothing  
+
+maybeNothing x = maybe (return Nothing) x
+
+pand:: State [Token] (Maybe (a->b)) -> State [Token] (Maybe a) -> State [Token] (Maybe b)
+pand f a = f >>= maybeNothing (\f'-> a >>= maybeNothing (return . Just . f'))
+
+expect:: State [Token] (Maybe a) -> State [Token] (Maybe b) -> State [Token] (Maybe a)
+expect f a = f >>= maybeNothing (\f'-> a >>= maybeNothing (const $ return $ Just f'))
+
+parseVarDec:: State [Token] (Maybe VarDec)
+parseVarDec = (return $ Just VarDec) `pand` parseIdent `expect` (parseSymbol ":") `pand` parseExpr
 
 unify:: Expr -> Expr -> State (M.Map String Expr) Bool 
 unify (IdentExpr var) t = state $ \m-> maybe (True, M.insert var t m) (\x-> (x==t, m)) $ M.lookup var m
@@ -100,7 +131,8 @@ unify (FuncExpr _ _) _ = return False
 
 getTokenTest line = show token ++ ":" ++ rest where (token, rest) = getToken line
 tokenizeTest line = intercalate "," $ map show $ tokenize line
-transformTest = (\(a, b)->show a ++ " : " ++ show b) . parseExpr . tokenize
+transformTest = (\(a, b)->show a ++ " : " ++ show b) . runState parseExpr . tokenize
+parseVarDecTest = show . runState parseVarDec . tokenize
 
 test x = forever $ getLine >>= (putStrLn . x)
-someFunc = test transformTest
+someFunc = test parseVarDecTest
