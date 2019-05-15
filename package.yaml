@@ -24,6 +24,7 @@ extra-source-files:
 author: Author name here
 github: githubuser/lightmath
 license: BSD3
+default-extensions: LambdaCase
 executables:
   lightmath-exe:
     source-dirs: app
