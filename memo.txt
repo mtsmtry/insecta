@@ -26,3 +26,25 @@ parseExpr ts = parseExpr' ts [] [] where
     -- Apply 'f' to a element that satisfy 'cond' for the first time
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
+
+Rewrite (FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0]) 
+(FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0],NumberExpr 0])
+
+FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Ident "f") 0) [FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0]],IdentExpr "a"]
+
+Rewrite 
+(FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Ident "f") 0) [FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0]],IdentExpr "a"]) 
+(FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Ident "f") 0) [FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0]],IdentExpr "a"],NumberExpr 0])
+
+FuncExpr (ExprHead (Symbol "+") 0) 
+[FuncExpr (ExprHead (Ident "f") 0) 
+[Rewrite (IdentExpr "a") (FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0])],
+Rewrite (IdentExpr "a") (FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0])]
+
+Rewrite 
+(FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0]) 
+(FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0],NumberExpr 0])
+
+Rewrite 
+(FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0]) 
+(FuncExpr (ExprHead (Symbol "+") 0) [FuncExpr (ExprHead (Symbol "+") 0) [IdentExpr "a",NumberExpr 0],NumberExpr 0])
