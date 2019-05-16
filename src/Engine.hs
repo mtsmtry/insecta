@@ -124,7 +124,7 @@ applyArgs:: (Expr -> Maybe Expr) -> [Expr] -> Maybe [Expr]
 applyArgs f xs = applyArgs' xs [] where
     applyArgs':: [Expr] -> [Expr] -> Maybe [Expr]
     applyArgs' [] _ = Nothing
-    applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ as ++ x:as') (f a)
+    applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
 
 simplify:: RuleMap -> Expr -> Expr
 simplify m e = maybe e (simplify m) $ step m e where
@@ -173,13 +173,15 @@ showExpr (FuncExpr h as) = if isAlpha (head f) || length as /= 2
     then f ++ "(" ++ intercalate "," (map showExpr as) ++ ")"
     else let [a, b] = as in showExpr a ++ f ++ showExpr b where f = showHead h
  
-program = "axiom () { a+0 >>= a }"
-declas = runState parseProgram . tokenize $ program
-
-toProp (Axiom _ p) = Just p
-toProp (Theorem _ p _) = Just p
-toProp _ = Nothing
-
 extractMaybe:: [Maybe a] -> [a]
 extractMaybe [] = []
 extractMaybe (x:xs) = maybe (extractMaybe xs) (:extractMaybe xs) x
+
+buildProgram:: String -> ((RuleMap, RuleMap, Simplicity), OpeMap)
+buildProgram str = (makeRuleMap props, omap) where
+    ((declas, omap), rest) = runState parseProgram . tokenize $ str
+    props = extractMaybe $ map toProp declas
+    toProp:: Decla -> Maybe Expr
+    toProp (Axiom _ p) = Just p
+    toProp (Theorem _ p _) = Just p
+    toProp _ = Nothing

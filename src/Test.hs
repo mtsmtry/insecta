@@ -2,18 +2,16 @@ module Test where
 import Data.Char
 import Data.List
 import Data.Maybe
+import qualified Data.Map as M
 import Control.Monad.State
 import Parse
 import Engine
 
-props = extractMaybe $maybe [] (map toProp) (fst declas)
-(stepRule, implRule, simpList) = makeRuleMap props
-
 tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
 
-simplifyTest:: String -> String
-simplifyTest str = "out:" ++ out ++ "\n"
+simplifyTest:: String -> String -> String
+simplifyTest prg str = "out:" ++ out ++ "\n"
         -- ++ "out':" ++ out' ++ "\n"
         -- ++ "simp:" ++ show simp ++ "\n"
         -- ++ "expr':" ++ show expr' ++ "\n"
@@ -22,11 +20,13 @@ simplifyTest str = "out:" ++ out ++ "\n"
         ++ "simpList:" ++ show simpList ++ "\n"
         ++ "stepRule:" ++ show stepRule ++ "\n"
         ++ "implRule:" ++ show implRule ++ "\n"
+        ++ "omap:" ++ show omap ++ "\n"
         -- ++ "declas:" ++ show declas ++ "\n" 
         -- ++ "props:" ++ show declas ++ "\n"
         -- ++ "rules:" ++ show (makeRules props) ++ "\n" 
         where
-    expr' = evalState parseExpr (tokenize str)
+    ((stepRule, implRule, simpList), omap) = buildProgram prg
+    expr' = (evalState $ parseExpr omap) (tokenize str)
     expr'' = fromMaybe (error "wrong expr") expr'
     expr = appSimp simpList expr''
     simp = simplify stepRule expr
@@ -36,7 +36,7 @@ simplifyTest str = "out:" ++ out ++ "\n"
 
 unifyTest:: String -> String
 unifyTest str = out where
-    exprs = fromMaybe [] $ evalState (parseCommaSeparated parseExpr) $ tokenize str
+    exprs = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
     [a, b] = exprs
     out = show $ unify a b
 
@@ -44,4 +44,6 @@ a = unify (IdentExpr "a") (Rewrite (IdentExpr "", IdentExpr "") (IdentExpr "x") 
 
 test x = forever $ getLine >>= (putStrLn . x)
 -- testFunc = test $ parserTest parseVarDecs 
-testFunc = test simplifyTest
+testFunc = do
+    file <- readFile "test.txt"
+    test $ simplifyTest file

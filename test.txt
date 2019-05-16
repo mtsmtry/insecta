@@ -1,0 +1,23 @@
+
+infixl + 10 => add
+infixl - 10 => sub
+infixl * 11 => mul
+infixl / 11 => div
+infixr ^ 12 => pow
+infixl && 5 => and
+
+axiom () {
+    a + 0 >>= a
+}
+
+axiom () {
+    a + 0 >>= a
+}
+
+axiom () {
+    a * 1 >>= a
+}
+
+axiom () {
+    A && B -> A
+}

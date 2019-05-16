@@ -34,7 +34,7 @@ tokenize all = (\(x, xs)-> maybe xs (:xs) x) $ tokenize <$> getToken all where
             make' f g = fmap (drop 1) $ first h $ span g xs
                 where h all = Just $ case all of [] -> Error all "no"; _ -> f all
             -- Char -> Bool
-            [isIdentSymbol, isOperator, isBracket] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$:~`.", "(){}[],"]
+            [isIdentSymbol, isOperator, isBracket] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$:~`.&", "(){}[],"]
             [isIdentHead, isIdentBody] = map any [[isLetter, ('_' ==)], [isLetter, isDigit, isIdentSymbol]]
                 where any = F.foldr ((<*>) . (<$>) (||)) $ const False
             -- String -> Token
@@ -42,10 +42,11 @@ tokenize all = (\(x, xs)-> maybe xs (:xs) x) $ tokenize <$> getToken all where
             toSymbol all = case all of "(" -> ParenOpen; ")" -> ParenClose; "," -> Comma; _ -> Symbol all
 
 type Rule = (Expr, Expr)
+type OpeMap = M.Map String (Int, Bool)
 data ExprHead = ExprHead Token Int | PureExprHead Token deriving (Show, Eq)
 data Expr = IdentExpr String | FuncExpr ExprHead [Expr] | StringExpr String | NumberExpr Int | Rewrite Rule Expr Expr deriving (Show, Eq)
-parseExpr:: State [Token] (Maybe Expr)
-parseExpr = state $ \ts-> parseExpr ts [] [] where--4
+parseExpr:: OpeMap -> State [Token] (Maybe Expr)
+parseExpr omap = state $ \ts-> parseExpr ts [] [] where--4
     -- (input tokens, operation stack, expression queue) -> (expression, rest token)
     parseExpr:: [Token] -> [(Token, Int)] -> [Expr] -> (Maybe Expr, [Token])
     parseExpr [] s q = (Just $ head $ makeExpr s q, [])
@@ -78,8 +79,8 @@ parseExpr = state $ \ts-> parseExpr ts [] [] where--4
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
     -- String -> (preceed, left associative)
-    getOpe = flip M.lookup $ M.fromList 
-        [(">>=", (0, True)), ("->", (1, True)), ("+", (10, True)), ("-", (10, True)), ("*", (11, True)), ("/", (11, True)), ("^", (12, False))]
+    getOpe = flip M.lookup $ M.union buildInOpe omap
+    buildInOpe = M.fromList [(">>=", (0, True)), ("->", (1, True))]
     precederEq:: String -> Token -> Bool
     precederEq s ParenOpen = False
     precederEq s (Ident _) = True
@@ -101,15 +102,21 @@ parseSequence p = p >>= \case
         Just s' -> return $ Just (x':s')
         Nothing -> return Nothing
     Nothing -> return $ Just []
-    
-parseToken:: Token -> State [Token] (Maybe Token) 
+
+parseToken:: Token -> State [Token] (Maybe Token)
 parseToken x = state $ \case
     [] -> (Nothing, [])
     all@(t:ts) -> if t == x then (Just x, ts) else (Nothing, all)
 parseSymbol x = parseToken (Symbol x)
+parseAnySymbol = state $ \case
+    [] -> (Nothing, [])
+    all@(t:ts) -> case t of Symbol _-> (Just t, ts); _-> (Nothing, all)
+parseNumber = state $ \case
+    [] -> (Nothing, [])
+    all@(t:ts) -> case t of Number n-> (Just n, ts); _-> (Nothing, all)
 parseIdent = state $ \case
     [] -> (Nothing, [])
-    all@(t:ts) -> case t of Ident i-> (Just i, ts); _-> (Nothing, all)
+    all@(t:ts) -> case t of Ident i-> (Just t, ts); _-> (Nothing, all)
 
 parseSeparated:: State [Token] (Maybe s) -> State [Token] (Maybe a) -> State [Token] (Maybe [a]) 
 parseSeparated s p = p >>= \case
@@ -121,48 +128,63 @@ parseSeparated s p = p >>= \case
     Nothing -> return $ Just []
 parseCommaSeparated = parseSeparated $ parseToken Comma
 
-data VarDecSet = VarDecSet [String] Expr deriving (Show)
-parseVarDecSet:: State [Token] (Maybe VarDecSet)
-parseVarDecSet = return (Just VarDecSet) <++> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr
+data VarDecSet = VarDecSet [Token] Expr deriving (Show)
+parseVarDecSet:: OpeMap -> State [Token] (Maybe VarDecSet)
+parseVarDecSet omap = return (Just VarDecSet) <++> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
 data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr [Statement] | BlockStm String Expr [Statement] deriving (Show)
-parseStatement:: State [Token] (Maybe Statement)
-parseStatement = parseIdent >>= \case
-    Just "step" -> return (Just StepStm) <++> parseExpr
-    Just "impl" -> return (Just ImplStm) <++> parseExpr
-    Just "assume" -> return (Just AssumeStm) <++> parseExpr <++> parseBlock
+parseStatement:: OpeMap -> State [Token] (Maybe Statement)
+parseStatement omap = parseIdent >>= \case
+    Just (Ident "step") -> return (Just StepStm) <++> parseExpr omap
+    Just (Ident "impl") -> return (Just ImplStm) <++> parseExpr omap
+    Just (Ident "assume") -> return (Just AssumeStm) <++> parseExpr omap <++> parseBlock
     _ -> return Nothing 
-    where parseBlock = return (Just id) <::> parseSymbol "{" <++> parseSequence parseStatement <::> parseSymbol "}"
+    where parseBlock = return (Just id) <::> parseSymbol "{" <++> parseSequence (parseStatement omap) <::> parseSymbol "}"
 
-type VarDec = [(String, Expr)]
-parseVarDecs:: State [Token] (Maybe VarDec)
-parseVarDecs = fmap conv (parseCommaSeparated parseVarDecSet) where
+type VarDec = [(Token, Expr)]
+parseVarDecs:: OpeMap -> State [Token] (Maybe VarDec)
+parseVarDecs omap = fmap conv (parseCommaSeparated $ parseVarDecSet omap) where
     toTuple (VarDecSet ns t) = (ns, repeat t)
     conv = Just . concatMap (uncurry zip) . maybe [] (map toTuple)
-parseParenVarDecs = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs <::> parseToken ParenClose
+parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 
 data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] 
-    | Define String VarDec Expr | Predicate String String Expr VarDec Expr deriving (Show)
-parseDecla:: Maybe String -> State [Token] (Maybe Decla)
-parseDecla (Just "axiom") = return (Just Axiom)
-    <++> parseParenVarDecs 
-    <::> parseSymbol "{" <++> parseExpr <::> parseSymbol "}"
-parseDecla (Just "theorem") = return (Just Theorem) 
-    <++> parseParenVarDecs 
+    | Define Token VarDec Expr | Predicate Token Token Expr VarDec Expr 
+    | InfixDecla Bool Token Int Token deriving (Show)
+parseDeclaBody:: OpeMap -> String -> State [Token] (Maybe Decla)
+parseDeclaBody omap "axiom" = return (Just Axiom)
+    <++> parseParenVarDecs omap
+    <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
+parseDeclaBody omap "theorem" = return (Just Theorem) 
+    <++> parseParenVarDecs omap
     <::> parseSymbol "{" 
-    <++> parseExpr 
-    <::> parseToken (Ident "proof") <::> parseSymbol ":" <++> parseSequence parseStatement
+    <++> parseExpr omap
+    <::> parseToken (Ident "proof") <::> parseSymbol ":" <++> parseSequence (parseStatement omap)
     <::> parseSymbol "}"
-parseDecla (Just "define") = return (Just Define)
+parseDeclaBody omap "define" = return (Just Define)
     <++> parseIdent
-    <++> parseParenVarDecs 
-    <::> parseSymbol "{" <++> parseExpr <::> parseSymbol "}"
-parseDecla (Just "predicate") = return (Just Predicate)
+    <++> parseParenVarDecs omap
+    <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
+parseDeclaBody omap "predicate" = return (Just Predicate)
     <++> parseIdent
-    <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr <::> parseSymbol "]"
-    <++> parseParenVarDecs
-    <::> parseSymbol "{" <++> parseExpr <::> parseSymbol "}"
-parseDecla _ = return Nothing
+    <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap<::> parseSymbol "]"
+    <++> parseParenVarDecs omap
+    <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
+parseDeclaBody omap "infixl" = return (Just $ InfixDecla True)
+    <++> parseAnySymbol <++> parseNumber <::> parseSymbol "=>" <++> parseIdent
+parseDeclaBody omap "infixr" = return (Just $ InfixDecla False)
+    <++> parseAnySymbol <++> parseNumber <::> parseSymbol "=>" <++> parseIdent
+parseDeclaBody _ _ = return Nothing
 
-parseProgram:: State [Token] (Maybe [Decla])
-parseProgram = parseSequence $ parseIdent >>= parseDecla
+parseDecla:: OpeMap -> State [Token] (Maybe Decla)
+parseDecla omap = parseIdent >>= \case (Just (Ident x))-> parseDeclaBody omap x; _ -> return Nothing
+
+parseProgram:: State [Token] ([Decla], OpeMap)
+parseProgram = parseProgram' M.empty where
+    parseRest:: Decla -> OpeMap -> State [Token] ([Decla], OpeMap)
+    parseRest x omap = parseProgram' omap >>= \(xs, omap')-> return (x:xs, omap')
+    parseProgram':: OpeMap -> State [Token] ([Decla], OpeMap)
+    parseProgram' omap = parseDecla omap >>= \case
+        Just x@(InfixDecla leftAssoc (Symbol s) pre fun) -> parseRest x $ M.insert s (pre, leftAssoc) omap
+        Just x -> parseRest x omap
+        Nothing -> return ([], omap)
