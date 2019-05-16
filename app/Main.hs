@@ -1,6 +1,6 @@
 module Main where
 
-import Parse
+import Test
 
 main :: IO ()
-main = someFunc
+main = testFunc
