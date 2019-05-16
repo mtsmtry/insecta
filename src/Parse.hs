@@ -80,7 +80,7 @@ parseExpr = state $ \ts-> parseExpr ts [] [] where--4
         where (a, b) = span (not <$> cond) all
     -- String -> (preceed, left associative)
     getOpe = flip M.lookup $ M.fromList 
-        [("+", (0, True)), ("-", (0, True)), ("*", (1, True)), ("/", (1, True)), ("^", (2, False))]
+        [(">>=", (0, True)), ("->", (1, True)), ("+", (10, True)), ("-", (10, True)), ("*", (11, True)), ("/", (11, True)), ("^", (12, False))]
     precederEq:: String -> Token -> Bool
     precederEq s ParenOpen = False
     precederEq s (Ident _) = True
@@ -168,17 +168,6 @@ parseDecla _ = return Nothing
 parseProgram:: State [Token] (Maybe [Decla])
 parseProgram = parseSequence $ parseIdent >>= parseDecla
 
-type Rule = (Expr, Expr)
-makeRules:: [Expr] -> ([Rule], [Rule])
-makeRules (x:xs) = if isStep then (r:ms, mi) else (ms, r:mi) where 
-    (isStep, r) = makeRule x
-    (ms, mi) = makeRules xs
-    -- expression -> (is step rule, rule)
-    makeRule:: Expr -> (Bool, Rule)
-    makeRule (FuncExpr (PureExprHead (Symbol kind)) [a, b]) = case kind of
-        ">>=" -> (True, (a, b))
-        "->" -> (False, (a, b))
-
 showToken:: Token -> String
 showToken (Symbol s) = s
 showToken (Ident s) = s
@@ -187,15 +176,28 @@ showHead:: ExprHead -> String
 showHead (ExprHead t _) = showToken t
 showHead (PureExprHead t) = showToken t
 
+type Rule = (Expr, Expr)
+makeRules:: [Expr] -> ([Rule], [Rule])
+makeRules [] = ([], [])
+makeRules (x:xs) = if isStep then (r:ms, mi) else (ms, r:mi) where 
+    (isStep, r) = makeRule x
+    (ms, mi) = makeRules xs
+    -- expression -> (is step rule, rule)
+    makeRule:: Expr -> (Bool, Rule)
+    makeRule (FuncExpr (PureExprHead (Symbol kind)) [a, b]) = case kind of
+        ">>=" -> (True, (a, b))
+        "->" -> (False, (a, b))
+        f -> error f
+
 type RuleMap = M.Map String [Rule] 
-makeRuleMap:: [Rule] -> RuleMap
-makeRuleMap rs = makeRuleMap' M.empty $ groupen rs where
-    groupen:: [Rule] -> [[Rule]]
-    groupen = groupBy (\(FuncExpr h _, _)-> \(FuncExpr h' _, _)-> (showHead h) == (showHead h'))
+toRuleMap:: [Rule] -> RuleMap
+toRuleMap rs = toRuleMap' M.empty $ groupBy equalsHead rs where
+    equalsHead (FuncExpr h _, _) (FuncExpr h' _, _) = showHead h == showHead h'
     getHead:: [Rule] -> String
     getHead ((FuncExpr h _, _):_) = showHead h
-    makeRuleMap':: RuleMap -> [[Rule]] -> RuleMap
-    makeRuleMap' m (r:rs) = makeRuleMap' (M.insert (getHead r) r m) rs
+    toRuleMap':: RuleMap -> [[Rule]] -> RuleMap
+    toRuleMap' m [] = m
+    toRuleMap' m (r:rs) = toRuleMap' (M.insert (getHead r) r m) rs
 
 type Simplicity = [String]
 makeSimp:: Simplicity -> [Rule] -> Simplicity
@@ -211,8 +213,11 @@ makeSimp m ((a, b):rs) = makeSimp (addSimp m a b) rs where
             (Nothing, Nothing) -> b:a:m
     addSimp m _ _ = m
     insertAt:: a -> Int -> [a] -> [a]
-    insertAt xs 0 as = xs:as
-    insertAt xs i (a:as) = a : insertAt xs (i - 1) as
+    insertAt x 0 as = x:as
+    insertAt x i (a:as) = a:insertAt x (i - 1) as
+
+makeRuleMap:: [Expr] -> (RuleMap, RuleMap, Simplicity)
+makeRuleMap xs = (toRuleMap a, toRuleMap b, makeSimp [] a) where (a, b) = makeRules xs
 
 unify:: Expr -> Expr -> Maybe (M.Map String Expr)
 unify p t = if b then Just m else Nothing where
@@ -274,26 +279,73 @@ apply:: [Rule] -> Expr -> Maybe Expr
 apply (r@(a, b):rs) e = maybe (apply rs e) (\m-> Just $ Rewrite r (assign m b) e) (unify a e)
 apply [] e = Nothing
 
+applyArgs:: (Expr -> Maybe Expr) -> [Expr] -> Maybe [Expr]
+applyArgs f = applyArgs' [] where
+    applyArgs':: [Expr] -> [Expr] -> Maybe [Expr]
+    applyArgs' [] _ = Nothing
+    applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ as ++ x:as') (f a)
+
 applyAtSimp:: [Rule] -> Int -> Expr -> Maybe Expr
 applyAtSimp rs s e@(FuncExpr h@(ExprHead t s') as) = 
     if s == s' then apply rs e <|> e' else e' where
-        e' = (applyArgs as []) >>= (Just . FuncExpr h)
-        applyArgs:: [Expr] -> [Expr] -> Maybe [Expr]
-        applyArgs [] _ = Nothing
-        applyArgs (a:as) as' = maybe (applyArgs as (a:as')) (\x-> Just $ as ++ x:as') (applyAtSimp rs s a)
+        e' = applyArgs (applyAtSimp rs s) as >>= Just . FuncExpr h
 
 applyByHeadList:: RuleMap -> [ExprHead] -> Expr -> Maybe Expr
 applyByHeadList _ [] _ = Nothing
-applyByHeadList m ((ExprHead f s):xs) e = ((M.lookup (showToken f) m) >>= (\x-> applyAtSimp x s e)) <|> applyByHeadList m xs e
+applyByHeadList m (ExprHead f s:xs) e = (M.lookup (showToken f) m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
 
 simplify:: RuleMap -> Expr -> Expr
 simplify m e = maybe e (simplify m) $ step m e where
     step:: RuleMap -> Expr -> Maybe Expr
     step m e = applyByHeadList m heads e where
-        heads = sortBy (\(ExprHead _ a)-> \(ExprHead _ b)-> a `compare` b) $ lookupHeads e
+        simpCompare (ExprHead _ a) (ExprHead _ b) = a `compare` b
+        heads = sortBy simpCompare $ lookupHeads e
+
+nextStep:: Expr -> Maybe Expr
+nextStep (Rewrite _ a b) = Just a
+nextStep (FuncExpr h as) = applyArgs nextStep as >>= Just . FuncExpr h
+nextStep _ = Nothing
+
+showSteps:: Expr -> [Expr]
+showSteps = showSteps' [] where
+    showSteps':: [Expr] -> Expr -> [Expr]
+    showSteps' p e = maybe p (\x-> showSteps' (x:p) x) $ nextStep e
+
+program = "axiom () { a+0 >>= a }"
+declas = runState parseProgram . tokenize $ program
+
+toProp (Axiom _ p) = Just p
+toProp (Theorem _ p _) = Just p
+toProp _ = Nothing
+
+extractMaybe:: [Maybe a] -> [a]
+extractMaybe [] = []
+extractMaybe (x:xs) = maybe (extractMaybe xs) (:extractMaybe xs) x
+
+props = extractMaybe $maybe [] (map toProp) (fst declas)
+(stepRule, implRule, simpList) = makeRuleMap props
 
 tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
 
+simplifyTest:: String -> String
+simplifyTest str = "result:" ++ show out ++ "\n"
+        ++ "expr':" ++ show expr' ++ "\n"
+        ++ "expr'':"  ++ show expr'' ++ "\n"
+        ++ "expr:" ++ show expr ++ "\n" 
+        ++ "simpList:" ++ show simpList ++ "\n"
+        ++ "stepRule:" ++ show stepRule ++ "\n"
+        ++ "implRule:" ++ show implRule ++ "\n"
+        ++ "declas:" ++ show declas ++ "\n" 
+        ++ "props:" ++ show declas ++ "\n"
+        ++ "rules:" ++ show (makeRules props) ++ "\n" where
+    expr' = evalState parseExpr (tokenize str)
+    expr'' = fromMaybe (error "wrong expr") expr'
+    expr = appSimp simpList expr''
+    simp = simplify stepRule expr
+    steps = showSteps simp
+    out = intercalate "\n" (map show steps)
+
 test x = forever $ getLine >>= (putStrLn . x)
-someFunc = test $ parserTest $ parseVarDecs
+-- someFunc = test $ parserTest parseVarDecs 
+someFunc = test $ simplifyTest
