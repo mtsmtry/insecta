@@ -14,12 +14,16 @@ import Engine
 type TypeMap = M.Map String Expr
 
 evalType:: TypeMap -> Expr -> Writer [Message] (Maybe Expr)
-evalType tmap (IdentExpr ph@(_, h)) =  maybe (writer (Nothing, [Message ph "Not defined"])) (return . Just) (M.lookup h tmap)
+evalType tmap NumberExpr{} = return $ Just $ makeIdentExpr "N"
+evalType tmap StringExpr{} = return $ Just $ makeIdentExpr "Char"
+evalType tmap (IdentExpr ph@(_, h)) = maybe (writer (Nothing, [Message ph "Not defined"])) (return . Just) (M.lookup h tmap)
 evalType tmap (FuncExpr (PureExprHead ph@(p, h)) as) = f $ \case
-    FuncExpr (PureExprHead (_, "implies")) [FuncExpr (PureExprHead (_, "tuple")) ts, b]->
-        checkArgs ts as >>= \x-> return (if x then ftype else Nothing)
-    _-> writer (Nothing, [Message ph "Not function"]) 
+    FuncExpr (PureExprHead (_, "->")) [arg, ret] ->
+        checkArgs as (getArgs arg) >>= \x-> return (if x then Just ret else Nothing)
+    _ -> writer (Nothing, [Message ph "Not function"]) 
     where
+    getArgs (FuncExpr (PureExprHead (_, "tuple")) xs) = xs
+    getArgs x = [x]
     checkArgs:: [Expr] -> [Expr] -> Writer [Message] Bool
     checkArgs [] [] = return True
     checkArgs [] _ = writer (False, [Message ph "Too few arguments"])
@@ -28,7 +32,7 @@ evalType tmap (FuncExpr (PureExprHead ph@(p, h)) as) = f $ \case
         checkType:: Writer [Message] Bool
         checkType = evalType tmap a >>= maybe (return False) (\x-> if equals t x 
             then return True 
-            else writer (False, [Message (showCodeExpr a) ("The type is not '" ++ showExpr t ++ "'")]))
+            else writer (False, [Message (showCodeExpr a) ("Couldn't match expected type '" ++ showExpr x ++ "' with actual type '" ++ showExpr t ++ "'")]))
     ftype = M.lookup h tmap
     f:: (Expr -> Writer [Message] (Maybe Expr)) -> Writer [Message] (Maybe Expr)
     f g = maybe (writer (Nothing, [Message ph "Not defined"])) g ftype
@@ -98,7 +102,7 @@ makeRules tmap (x:xs) = do
     return $ case result of 
         Nothing-> (ms, mi)
         Just (isStep, r)-> if isStep then (r:ms, mi) else (ms, r:mi) 
-    where 
+    where
     -- expression -> (is step rule, rule)
     makeRule:: Expr -> Writer [Message] (Maybe (Bool, Rule))
     makeRule e@(FuncExpr (PureExprHead pk@(p, kind)) [a, b]) = case kind of
@@ -114,11 +118,10 @@ makeRules tmap (x:xs) = do
                 _-> return Nothing
         "->" -> do
             et' <- evalType tmap e
-            case et' of 
-                Just et->
-                    if isIdentOf "Prop" et 
-                        then return $ Just (False, (a, b))
-                        else writer (Nothing, [Message pk $ "Expected type is 'Prop', but actual type is" ++ showExpr et])
+            case et' of
+                Just et-> if isIdentOf "Prop" et 
+                    then return $ Just (False, (a, b))
+                    else writer (Nothing, [Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ showExpr et ++ "'"])
                 Nothing-> return Nothing
         f -> writer (Nothing, [Message pk "Wrong function"])
 

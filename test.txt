@@ -1,4 +1,6 @@
 
+
+
 infixl + 10 => add
 infixl - 10 => sub
 infixl * 11 => mul
@@ -7,7 +9,8 @@ infixr ^ 12 => pow
 infixl && 5 => and
 
 data N = O | S(N)
-undef +: N->N->N
+
+undef operator +: (N, N)->N
 
 axiom (a: N) {
     a + 0 >>= a

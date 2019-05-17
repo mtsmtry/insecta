@@ -11,7 +11,7 @@ import Control.Arrow
 import Control.Applicative
 
 data Position = Position Int Int | NonePosition deriving (Eq, Show)
-data Token = EndLine | Ident String | Number Int 
+data Token = Ident String | Number Int 
     | Literal String | LiteralOne Char | Symbol String 
     | Comma | ParenOpen | ParenClose | Error String String deriving (Eq, Show)
 data PosToken = PosToken Position Token deriving (Eq, Show)
@@ -44,7 +44,7 @@ tokenize = tokenize' $ Position 1 1 where
                 (t, rest) = span g xs
                 h all = Just $ case all of [] -> Error all "no"; _ -> f all
             -- Char -> Bool
-            [isIdentSymbol, isOperator, isBracket] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$:~`.&", "(){}[],"]
+            [isIdentSymbol, isOperator, isBracket] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&", "(){}[],:"]
             [isIdentHead, isIdentBody] = map any [[isLetter, ('_' ==)], [isLetter, isDigit, isIdentSymbol]]
                 where any = F.foldr ((<*>) . (<$>) (||)) $ const False
             -- String -> Token
@@ -76,6 +76,13 @@ getPosAndStr (FuncExpr (PureExprHead ps) _) = ps
 showToken:: Token -> String
 showToken (Symbol s) = s
 showToken (Ident s) = s
+showToken (Number n) = show n
+showToken (Literal s) = '"':s ++ "\""
+showToken (LiteralOne s) = ['\'', s, '\'']
+showToken Comma = ","
+showToken ParenOpen = "("
+showToken ParenClose = ")"
+showToken (Error s _) = s
 
 showHead:: ExprHead -> String
 showHead (ExprHead (_, t) _) = t
@@ -89,10 +96,10 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
     parseExpr all@(px@(PosToken p x):xs) s q = case x of
         Error t m   -> (Nothing, all)
         Number n    -> maybeEnd $ parseExpr xs s (NumberExpr p n:q)
-        Ident i     -> maybeEnd $ if xs /= [] && getToken (head xs) == ParenOpen
-            then parseExpr xs ((px, 1):s) q
-            else parseExpr xs s (IdentExpr (p, i):q)
-        ParenOpen   -> maybeEnd $ parseExpr xs ((px, 2):s) q -- 2 args for end condition
+        Ident i     -> maybeEnd $ case xs of
+            (po@(PosToken _ ParenOpen):xs')-> parseExpr xs' ((po, 2):(px, 1):s) q
+            _-> parseExpr xs s (IdentExpr (p, i):q)
+        ParenOpen   -> maybeEnd $ parseExpr xs ((px, 2):(tuple, 1):s) q -- 2 args for end condition
         ParenClose  -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
             (opes, _:rest) = span ((not <$> isParenOpen) . fst) s
         Comma       -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
@@ -107,12 +114,13 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
             isParenOpen = \case PosToken _ ParenOpen -> True; _ -> False
             result = (Just $ head $ makeExpr s q, all)
             maybeEnd a = if sum (map ((-1+) . snd) s) + 1 == length q then result else a
+    tuple = PosToken NonePosition (Ident "tuple")
     -- ((operator or function token, argument number), input) -> output
     makeExpr:: [(PosToken, Int)] -> [Expr] -> [Expr]
     makeExpr [] q = q
+    makeExpr ((PosToken _ (Ident "tuple"), 1):os) q = makeExpr os q
     makeExpr ((PosToken p t, n):os) q = makeExpr os $ FuncExpr (PureExprHead (p, showToken t)) args:rest
         where (args, rest) = (reverse $ take n q, drop n q)
-    getToken (PosToken _ t) = t
     -- apply 'f' to a element that satisfy 'cond' for the first time
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
@@ -161,7 +169,8 @@ parseNumber = state $ \case
 parseIdent:: State [PosToken] (Maybe PosStr)
 parseIdent = state $ \case
     [] -> (Nothing, [])
-    all@((PosToken p (Ident s)):ts) -> (Just (p, s), ts)
+    (PosToken _ (Ident "operator"):PosToken p (Symbol s):ts) -> (Just (p, s), ts)
+    (PosToken p (Ident s):ts) -> (Just (p, s), ts)
     all -> (Nothing, all)
 
 parseSeparated:: State [PosToken] (Maybe s) -> State [PosToken] (Maybe a) -> State [PosToken] (Maybe [a]) 

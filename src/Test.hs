@@ -45,7 +45,7 @@ unifyTest str = out where
     out = show $ unify a b
 
 test x = forever $ getLine >>= (putStrLn . x)
--- testFunc = test $ parserTest parseVarDecs 
+testFunc2 = test $ parserTest $ parseDecla M.empty
 testFunc = do
     file <- readFile "test.txt"
     test $ simplifyTest file

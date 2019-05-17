@@ -58,7 +58,11 @@ assign m (FuncExpr f as) = FuncExpr f $ map (assign m) as
 assign m e = e
 
 equals:: Expr -> Expr -> Bool
-equals a b = extractRewrite a == extractRewrite b
+equals (IdentExpr (_, a)) (IdentExpr (_, b)) = a == b
+equals (FuncExpr f as) (FuncExpr g bs) = (showHead f == showHead g) && all (uncurry (==)) (zip as bs)
+equals (NumberExpr _ n) (NumberExpr _ m) = n == m
+equals (StringExpr a) (StringExpr b) = a == b
+equals _ _ = False
 
 applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
 applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g 
