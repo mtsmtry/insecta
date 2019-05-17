@@ -22,11 +22,13 @@ simplifyTest prg str = "out:" ++ out ++ "\n"
         ++ "stepRule:" ++ show stepRule ++ "\n"
         ++ "implRule:" ++ show implRule ++ "\n"
         ++ "omap:" ++ show omap ++ "\n"
+        ++ "msgs:" ++ msg ++ "\n"
         -- ++ "declas:" ++ show declas ++ "\n" 
         -- ++ "props:" ++ show declas ++ "\n"
         -- ++ "rules:" ++ show (makeRules props) ++ "\n" 
         where
-    ((stepRule, implRule, simpList), omap, tmap) = buildProgram prg
+    ((stepRule, implRule, simpList), omap, tmap, msgs) = buildProgram prg
+    msg = intercalate "\n" $ fmap show msgs
     expr' = (evalState $ parseExpr omap) (tokenize str)
     expr'' = fromMaybe (error "wrong expr") expr'
     expr = appSimp simpList expr''

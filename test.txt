@@ -8,18 +8,18 @@ infixl && 5 => and
 
 data N = O | S(N)
 
-axiom () {
+axiom (a: N) {
     a + 0 >>= a
 }
 
-axiom () {
+axiom (a: N) {
     a + 0 >>= a
 }
 
-axiom () {
+axiom (a: N) {
     a * 1 >>= a
 }
 
-axiom () {
+axiom (A: Prop, B: Prop) {
     A && B -> A
 }

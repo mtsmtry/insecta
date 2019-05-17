@@ -12,38 +12,57 @@ import Parse
 import Engine
 
 type TypeMap = M.Map String Expr
-data Message = Message Position String String
 
 evalType:: TypeMap -> Expr -> Writer [Message] (Maybe Expr)
-evalType tmap (IdentExpr _ i) = return $ M.lookup i tmap
-evalType tmap (FuncExpr (PureExprHead p h) as) = f $ \case
-    FuncExpr (PureExprHead _ "implies") [FuncExpr (PureExprHead _ "tuple") ts, b]->
+evalType tmap (IdentExpr (_, i)) = return $ M.lookup i tmap
+evalType tmap (FuncExpr (PureExprHead ph@(p, h)) as) = f $ \case
+    FuncExpr (PureExprHead (_, "implies")) [FuncExpr (PureExprHead (_, "tuple")) ts, b]->
         checkArgs ts as >>= \x-> return (if x then ftype else Nothing)
-    _-> writer (Nothing, [Message p h "is not function"]) 
+    _-> writer (Nothing, [Message ph "Not function"]) 
     where
     checkArgs:: [Expr] -> [Expr] -> Writer [Message] Bool
     checkArgs [] [] = return True
-    checkArgs [] _ = writer (False, [Message p h "wrong the number of arguments"])
-    checkArgs _ [] = writer (False, [Message p h "wrong the number of arguments"])
-    checkArgs (a:as) (t:ts) = (checkArgs as ts) where
-        atype = evalType tmap a >>= return . maybe False (equals t)
+    checkArgs [] _ = writer (False, [Message ph "Too few arguments"])
+    checkArgs _ [] = writer (False, [Message ph "Too many arguments"])
+    checkArgs (a:as) (t:ts) = checkType >>= \x-> let (a, msgs) = runWriter (checkArgs as ts) in writer (a||x, msgs) where
+        checkType:: Writer [Message] Bool
+        checkType = maybe False (equals t) <$> evalType tmap a
     ftype = M.lookup h tmap
     f:: (Expr -> Writer [Message] (Maybe Expr)) -> Writer [Message] (Maybe Expr)
-    f g = maybe (writer (Nothing, [Message p h "not defined"])) g ftype
+    f g = maybe (writer (Nothing, [Message ph "Not defined"])) g ftype
 
-makeTypeMap:: [Decla] -> TypeMap
-makeTypeMap [] = M.empty
-makeTypeMap (x:xs) = getType (makeTypeMap xs) x where
-    getType:: TypeMap -> Decla -> TypeMap
-    getType m (Undef t e) = M.insert (showToken t) e m
-    getType m (Define t args ret def) = M.insert (showToken t) item m where
-        item = FuncExpr (PureExprHead NonePosition "tuple") [FuncExpr (PureExprHead NonePosition "->") (map snd args), ret]
-    getType m _ = m
+extractArgs:: String -> Expr -> [Expr]
+extractArgs s e@(FuncExpr (PureExprHead (_, s')) as) = if s == s' then concatMap (extractArgs s) as else [e]
+extractArgs s e = [e]
 
-buildProgram:: String -> ((RuleMap, RuleMap, Simplicity), OpeMap, TypeMap)
-buildProgram str = (makeRuleMap props, omap, tmap) where
+makeFuncType:: [Expr] -> Expr -> Expr
+makeFuncType args ret = FuncExpr (makeExprHead "tuple") [(FuncExpr $ makeExprHead "->") args, ret]
+
+addIdent:: String -> Expr -> TypeMap -> Writer [Message] TypeMap
+addIdent i t m = return $ M.insert i t m
+
+makeTypeMap:: [Decla] -> TypeMap -> Writer [Message] TypeMap
+makeTypeMap [] = addIdent "Prop" (makeIdentExpr "Type")
+makeTypeMap (x:xs) = \m -> getType x m >>= makeTypeMap xs where
+    getType:: Decla -> TypeMap -> Writer [Message] TypeMap
+    getType (DataType (p, t) def) = addCstr cstrs where
+        thisType = makeIdentExpr t
+        cstrs = extractArgs "|" def
+        addCstr:: [Expr] -> TypeMap -> Writer [Message] TypeMap
+        addCstr (IdentExpr (_, i):xs) m = addIdent i thisType m >>= addCstr xs
+        addCstr (FuncExpr (PureExprHead (_, i)) as:xs) m = addIdent i thisType m >>= addCstr xs
+    getType (Undef (_, t) e) = addIdent t e
+    getType (Define (_, t) args ret def) = addIdent t (makeFuncType (toTypes args) ret) where
+    getType _ = return
+
+    toTypes:: VarDec -> [Expr]
+    toTypes ((i, t):xs) = t:toTypes xs
+
+buildProgram:: String -> ((RuleMap, RuleMap, Simplicity), OpeMap, TypeMap, [Message])
+buildProgram str = (rmap, omap, tmap, msgs ++ msgs') where
+    (rmap, msgs) = runWriter $ makeRuleMap props
     ((declas, omap), rest) = runState parseProgram . tokenize $ str
-    tmap = makeTypeMap declas
+    (tmap, msgs') = runWriter $ makeTypeMap declas M.empty
     props = extractMaybe $ map toProp declas
     toProp:: Decla -> Maybe Expr
     toProp (Axiom _ p) = Just p

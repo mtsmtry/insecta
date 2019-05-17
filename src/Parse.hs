@@ -15,6 +15,8 @@ data Token = EndLine | Ident String | Number Int
     | Literal String | LiteralOne Char | Symbol String 
     | Comma | ParenOpen | ParenClose | Error String String deriving (Eq, Show)
 data PosToken = PosToken Position Token deriving (Eq, Show)
+data Message = Message PosStr String deriving (Show)
+type PosStr = (Position, String)
 
 tokenize:: String -> [PosToken]
 tokenize = tokenize' $ Position 1 1 where
@@ -55,17 +57,29 @@ tokenize = tokenize' $ Position 1 1 where
 
 type Rule = (Expr, Expr)
 type OpeMap = M.Map String (Int, Bool)
-data ExprHead = ExprHead Position String Int | PureExprHead Position String deriving (Show, Eq)
-data Expr = IdentExpr Position String | FuncExpr ExprHead [Expr] 
-        | StringExpr Position String | NumberExpr Position Int | Rewrite Rule Expr Expr deriving (Show, Eq)
+data ExprHead = ExprHead PosStr Int | PureExprHead PosStr deriving (Show, Eq)
+data Expr = IdentExpr PosStr | FuncExpr ExprHead [Expr] 
+        | StringExpr PosStr | NumberExpr Position Int | Rewrite Rule Expr Expr deriving (Show, Eq)
+
+makePosStr s = (NonePosition, s)
+makeExprHead = PureExprHead . makePosStr
+makeIdentExpr = IdentExpr . makePosStr
+
+getPosAndStr:: Expr -> PosStr
+getPosAndStr (IdentExpr ps) = ps
+getPosAndStr (StringExpr ps) = ps
+getPosAndStr (NumberExpr p n) = (p, show n)
+getPosAndStr (Rewrite _ a _) = getPosAndStr a
+getPosAndStr (FuncExpr (ExprHead ps _) _) = ps
+getPosAndStr (FuncExpr (PureExprHead ps) _) = ps
 
 showToken:: Token -> String
 showToken (Symbol s) = s
 showToken (Ident s) = s
 
 showHead:: ExprHead -> String
-showHead (ExprHead _ t _) = t
-showHead (PureExprHead _ t) = t
+showHead (ExprHead (_, t) _) = t
+showHead (PureExprHead (_, t)) = t
         
 parseExpr:: OpeMap -> State [PosToken] (Maybe Expr)
 parseExpr omap = state $ \ts-> parseExpr ts [] [] where
@@ -77,7 +91,7 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
         Number n    -> maybeEnd $ parseExpr xs s (NumberExpr p n:q)
         Ident i     -> maybeEnd $ if xs /= [] && getToken (head xs) == ParenOpen
             then parseExpr xs ((px, 1):s) q
-            else parseExpr xs s (IdentExpr p i:q)
+            else parseExpr xs s (IdentExpr (p, i):q)
         ParenOpen   -> maybeEnd $ parseExpr xs ((px, 2):s) q -- 2 args for end condition
         ParenClose  -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
             (opes, _:rest) = span ((not <$> isParenOpen) . fst) s
@@ -96,7 +110,7 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
     -- ((operator or function token, argument number), input) -> output
     makeExpr:: [(PosToken, Int)] -> [Expr] -> [Expr]
     makeExpr [] q = q
-    makeExpr ((PosToken p t, n):os) q = makeExpr os $ FuncExpr (PureExprHead p $ showToken t) args:rest
+    makeExpr ((PosToken p t, n):os) q = makeExpr os $ FuncExpr (PureExprHead (p, showToken t)) args:rest
         where (args, rest) = (reverse $ take n q, drop n q)
     getToken (PosToken _ t) = t
     -- apply 'f' to a element that satisfy 'cond' for the first time
@@ -133,20 +147,22 @@ parseToken x = state $ \case
     all@((PosToken _ t):ts) -> if t == x then (Just x, ts) else (Nothing, all)
 parseSymbol x = parseToken (Symbol x)
 
-parseAnySymbol:: State [PosToken] (Maybe Token)
+parseAnySymbol:: State [PosToken] (Maybe PosStr)
 parseAnySymbol = state $ \case
     [] -> (Nothing, [])
-    all@((PosToken _ t):ts) -> case t of Symbol _-> (Just t, ts); _-> (Nothing, all)
+    (PosToken p (Symbol s):ts) -> (Just (p, s), ts)
+    all -> (Nothing, all)
 
 parseNumber:: State [PosToken] (Maybe Int)
 parseNumber = state $ \case
     [] -> (Nothing, [])
     all@((PosToken _ t):ts) -> case t of Number n-> (Just n, ts); _-> (Nothing, all)
 
-parseIdent:: State [PosToken] (Maybe Token)
+parseIdent:: State [PosToken] (Maybe PosStr)
 parseIdent = state $ \case
     [] -> (Nothing, [])
-    all@((PosToken _ t):ts) -> case t of Ident i-> (Just t, ts); _-> (Nothing, all)
+    all@((PosToken p (Ident s)):ts) -> (Just (p, s), ts)
+    all -> (Nothing, all)
 
 parseSeparated:: State [PosToken] (Maybe s) -> State [PosToken] (Maybe a) -> State [PosToken] (Maybe [a]) 
 parseSeparated s p = p >>= \case
@@ -157,32 +173,36 @@ parseSeparated s p = p >>= \case
         Nothing -> return $ Just [x']
     Nothing -> return $ Just []
 
+parseCommaSeparated:: State [PosToken] (Maybe a) -> State [PosToken] (Maybe [a]) 
 parseCommaSeparated = parseSeparated $ parseToken Comma
 
-data VarDecSet = VarDecSet [Token] Expr deriving (Show)
+data VarDecSet = VarDecSet [PosStr] Expr deriving (Show)
 parseVarDecSet:: OpeMap -> State [PosToken] (Maybe VarDecSet)
 parseVarDecSet omap = return (Just VarDecSet) <++> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
 data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr [Statement] | BlockStm String Expr [Statement] deriving (Show)
 parseStatement:: OpeMap -> State [PosToken] (Maybe Statement)
 parseStatement omap = parseIdent >>= \case
-    Just (Ident "step") -> return (Just StepStm) <++> parseExpr omap
-    Just (Ident "impl") -> return (Just ImplStm) <++> parseExpr omap
-    Just (Ident "assume") -> return (Just AssumeStm) <++> parseExpr omap <++> parseBlock
+    Just (_, "step") -> return (Just StepStm) <++> parseExpr omap
+    Just (_, "impl") -> return (Just ImplStm) <++> parseExpr omap
+    Just (_, "assume") -> return (Just AssumeStm) <++> parseExpr omap <++> parseBlock
     _ -> return Nothing 
     where parseBlock = return (Just id) <::> parseSymbol "{" <++> parseSequence (parseStatement omap) <::> parseSymbol "}"
 
-type VarDec = [(Token, Expr)]
+type VarDec = [(PosStr, Expr)]
 parseVarDecs:: OpeMap -> State [PosToken] (Maybe VarDec)
-parseVarDecs omap = fmap conv (parseCommaSeparated $ parseVarDecSet omap) where
-    toTuple (VarDecSet ns t) = (ns, repeat t)
+parseVarDecs omap = fmap conv parse where
+    parse:: State [PosToken] (Maybe [VarDecSet])
+    parse = parseCommaSeparated $ parseVarDecSet omap
+    conv:: Maybe [VarDecSet] -> Maybe VarDec
     conv = Just . concatMap (uncurry zip) . maybe [] (map toTuple)
+    toTuple (VarDecSet ns t) = (ns, repeat t)
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 
 data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] 
-    | Define Token VarDec Expr Expr | Predicate Token Token Expr VarDec Expr
-    | DataType Token Expr | Undef Token Expr
-    | InfixDecla Bool Token Int Token deriving (Show)
+    | Define PosStr VarDec Expr Expr | Predicate PosStr PosStr Expr VarDec Expr
+    | DataType PosStr Expr | Undef PosStr Expr
+    | InfixDecla Bool PosStr Int PosStr deriving (Show)
 parseDeclaBody:: OpeMap -> String -> State [PosToken] (Maybe Decla)
 parseDeclaBody omap "axiom" = return (Just Axiom)
     <++> parseParenVarDecs omap
@@ -214,7 +234,7 @@ parseDeclaBody omap "infixr" = return (Just $ InfixDecla False)
 parseDeclaBody _ _ = return Nothing
 
 parseDecla:: OpeMap -> State [PosToken] (Maybe Decla)
-parseDecla omap = parseIdent >>= \case (Just (Ident x))-> parseDeclaBody omap x; _ -> return Nothing
+parseDecla omap = parseIdent >>= \case (Just (_, x))-> parseDeclaBody omap x; _ -> return Nothing
 
 parseProgram:: State [PosToken] ([Decla], OpeMap)
 parseProgram = parseProgram' M.empty where
@@ -222,6 +242,6 @@ parseProgram = parseProgram' M.empty where
     parseRest x omap = parseProgram' omap >>= \(xs, omap')-> return (x:xs, omap')
     parseProgram':: OpeMap -> State [PosToken] ([Decla], OpeMap)
     parseProgram' omap = parseDecla omap >>= \case
-        Just x@(InfixDecla leftAssoc (Symbol s) pre fun) -> parseRest x $ M.insert s (pre, leftAssoc) omap
+        Just x@(InfixDecla leftAssoc (_, s) pre fun) -> parseRest x $ M.insert s (pre, leftAssoc) omap
         Just x -> parseRest x omap
         Nothing -> return ([], omap)
