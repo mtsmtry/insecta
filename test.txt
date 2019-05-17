@@ -11,6 +11,9 @@ infixl && 5 => and
 data N = O | S(N)
 
 undef operator +: (N, N)->N
+undef operator *: (N, N)->N
+undef operator ->: (Prop, Prop)->Prop
+undef operator &&: (Prop, Prop)->Prop
 
 axiom (a: N) {
     a + 0 >>= a

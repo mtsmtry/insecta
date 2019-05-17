@@ -12,6 +12,7 @@ import Parse
 import Engine
 
 type TypeMap = M.Map String Expr
+data TypedExpr = TypedExpr Expr TypeMap
 
 evalType:: TypeMap -> Expr -> Writer [Message] (Maybe Expr)
 evalType tmap NumberExpr{} = return $ Just $ makeIdentExpr "N"
@@ -88,13 +89,17 @@ makeTypeMap (x:xs) = (>>= makeTypeMap xs) . (getType x) where
 
 makeScope:: TypeMap -> VarDec -> Writer [Message] TypeMap
 makeScope gm xs = makeScope' gm xs M.empty where
-    makeScope' gm ((ps@(p, s), e):xs) lm = evalType gm e 
+    makeScope' gm [] lm = return lm
+    makeScope' gm ((ps@(p, s), e):xs) lm = evalType gm e
         >>= maybe (return lm) (\x-> if isTypeType x 
                 then return $ M.insert s x lm 
                 else writer (lm, [Message ps ("Not type")]))
         >>= makeScope' gm xs
 
-makeRules:: TypeMap -> [Expr] -> Writer [Message] ([Rule], [Rule])
+makeScopedExpr:: TypeMap -> VarDec -> Expr -> Writer [Message] (Maybe TypedExpr)
+makeScopedExpr gs vd e = makeScope gs vd >>= (return . Just . (TypedExpr e))
+
+makeRules:: TypeMap -> [TypedExpr] -> Writer [Message] ([Rule], [Rule])
 makeRules tmap [] = return ([], [])
 makeRules tmap (x:xs) = do
     result <- makeRule x
@@ -104,11 +109,12 @@ makeRules tmap (x:xs) = do
         Just (isStep, r)-> if isStep then (r:ms, mi) else (ms, r:mi) 
     where
     -- expression -> (is step rule, rule)
-    makeRule:: Expr -> Writer [Message] (Maybe (Bool, Rule))
-    makeRule e@(FuncExpr (PureExprHead pk@(p, kind)) [a, b]) = case kind of
+    makeRule:: TypedExpr -> Writer [Message] (Maybe (Bool, Rule))
+    makeRule (TypedExpr e@(FuncExpr (PureExprHead pk@(p, kind)) [a, b]) ls) = 
+        let scope = M.union ls tmap in case kind of
         ">>=" -> do
-            at' <- evalType tmap a
-            bt' <- evalType tmap b
+            at' <- evalType scope a
+            bt' <- evalType scope b
             case (at', bt') of 
                 (Just at, Just bt)-> if equals a b
                     then return $ Just (True, (a, b)) 
@@ -117,13 +123,14 @@ makeRules tmap (x:xs) = do
                         y = "but right side type is'" ++ showExpr bt ++ "'"
                 _-> return Nothing
         "->" -> do
-            et' <- evalType tmap e
+            et' <- evalType scope e
             case et' of
                 Just et-> if isIdentOf "Prop" et 
                     then return $ Just (False, (a, b))
                     else writer (Nothing, [Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ showExpr et ++ "'"])
                 Nothing-> return Nothing
         f -> writer (Nothing, [Message pk "Wrong function"])
+    makeRule (TypedExpr e _) = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
 
 toRuleMap:: [Rule] -> RuleMap
 toRuleMap rs = toRuleMap' M.empty $ groupBy equalsHead rs where
@@ -133,7 +140,7 @@ toRuleMap rs = toRuleMap' M.empty $ groupBy equalsHead rs where
     toRuleMap':: RuleMap -> [[Rule]] -> RuleMap
     toRuleMap' = foldl (\m r-> M.insert (getHead r) r m)
 
-makeRuleMap:: TypeMap -> [Expr] -> Writer [Message] (RuleMap, RuleMap, Simplicity)
+makeRuleMap:: TypeMap -> [TypedExpr] -> Writer [Message] (RuleMap, RuleMap, Simplicity)
 makeRuleMap tmap xs = do
     (a, b) <- makeRules tmap xs
     simp <- makeSimp [] a
@@ -142,12 +149,13 @@ makeRuleMap tmap xs = do
     return (toMap a, toMap b, simp)
 
 buildProgram:: String -> ((RuleMap, RuleMap, Simplicity), OpeMap, TypeMap, [Message])
-buildProgram str = (rmap, omap, tmap, msgs ++ msgs') where
+buildProgram str = (rmap, omap, tmap, msgs ++ msgs' ++ msgs'') where
     (tmap, msgs') = runWriter $ makeTypeMap declas M.empty
     (rmap, msgs) = runWriter $ makeRuleMap tmap props
     ((declas, omap), rest) = runState parseProgram . tokenize $ str
-    props = extractMaybe $ map toProp declas
-    toProp:: Decla -> Maybe Expr
-    toProp (Axiom _ p) = Just p
-    toProp (Theorem _ p _) = Just p
-    toProp _ = Nothing
+    (props', msgs'') = runWriter $ mapM toProp declas
+    props = extractMaybe props'
+    toProp:: Decla -> Writer [Message] (Maybe TypedExpr)
+    toProp (Axiom ls p) = makeScopedExpr tmap ls p
+    toProp (Theorem ls p _) = makeScopedExpr tmap ls p
+    toProp _ = return Nothing
