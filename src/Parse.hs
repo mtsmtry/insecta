@@ -10,29 +10,34 @@ import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
 
+data Position = Position Int Int
 data Token = EndLine | Ident String | Number Int 
     | Literal String | LiteralOne Char | Symbol String 
     | Comma | ParenOpen | ParenClose | Error String String deriving (Eq, Show)
-tokenize :: String -> [Token]
-tokenize [] = []
-tokenize all = (\(x, xs)-> maybe xs (:xs) x) $ tokenize <$> getToken all where
-    getToken :: String -> (Maybe Token, String)
-    getToken [] = (Nothing, [])
-    getToken (x:xs)
+data PosToken = PosToken Position Token
+tokenize :: Position -> String -> [PosToken]
+tokenize p [] = []
+tokenize p all = let (x, xs, p') = getToken p all in maybe id (:) x (tokenize p' xs) where
+    getToken :: Position -> String -> (Maybe PosToken, String, Position)
+    getToken p [] = (Nothing, [], p)
+    getToken p (x:xs)
         | isDigit x = make (Number . read) isDigit
         | isIdentHead x = make Ident isIdentBody
         | isOperator x = make Symbol isOperator
-        | isBracket x = (Just $ toSymbol [x], xs)
+        | isBracket x = (Just $ PosToken p $ toSymbol [x], xs, nextChar p)
         | x == '"' = make' Literal ('"' /=)
-        | x == '#' = first (const Nothing) $ span ('\n' /=) xs
+        | x == '#' = let (t, rest) = span ('\n' /=) xs in (Nothing, rest, addChar p $ length t) 
         | x == '\'' = make' toChar ('\'' /=)
-        | isSpace x = (Nothing, xs)
-        | otherwise = (Just $ Error [x] "wrong", xs)
+        | x == '\n' = (Nothing, xs, nextLine p)
+        | isSpace x = (Nothing, xs, nextChar p)
+        | otherwise = (Just $ PosToken p $ Error [x] "wrong", xs, nextChar p)
         where
-            -- (token constructor, tail condition) -> (token, rest string)
-            make f g = first (Just . f . (x:)) $ span g xs
-            make' f g = fmap (drop 1) $ first h $ span g xs
-                where h all = Just $ case all of [] -> Error all "no"; _ -> f all
+            appPos = PosToken p
+            -- (token constructor, tail condition) -> (token, rest string, position)
+            make f g = ((Just . appPos . f . (x:)) t, rest, addChar p $ length t) where (t, rest) = span g xs
+            make' f g = (appPos <$> (h t), drop 1 rest, addChar p $ length t) where 
+                (t, rest) = span g xs
+                h all = Just $ case all of [] -> Error all "no"; _ -> f all
             -- Char -> Bool
             [isIdentSymbol, isOperator, isBracket] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$:~`.&", "(){}[],"]
             [isIdentHead, isIdentBody] = map any [[isLetter, ('_' ==)], [isLetter, isDigit, isIdentSymbol]]
@@ -40,6 +45,10 @@ tokenize all = (\(x, xs)-> maybe xs (:xs) x) $ tokenize <$> getToken all where
             -- String -> Token
             toChar all = case all of [x] -> LiteralOne x; [] -> Error all "too short"; (x:xs) -> Error all "too long"
             toSymbol all = case all of "(" -> ParenOpen; ")" -> ParenClose; "," -> Comma; _ -> Symbol all
+            
+            addChar (Position c l) n = Position (c+n) l
+            nextChar (Position c l) = Position (c+1) l
+            nextLine (Position c l) = Position c (l+1)
 
 type Rule = (Expr, Expr)
 type OpeMap = M.Map String (Int, Bool)
@@ -80,7 +89,7 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where--4
         where (a, b) = span (not <$> cond) all
     -- String -> (preceed, left associative)
     getOpe = flip M.lookup $ M.union buildInOpe omap
-    buildInOpe = M.fromList [(">>=", (0, True)), ("->", (1, True))]
+    buildInOpe = M.fromList [(">>=", (0, True)), ("->", (1, True)), ("|", (2, True))]
     precederEq:: String -> Token -> Bool
     precederEq s ParenOpen = False
     precederEq s (Ident _) = True
@@ -149,7 +158,8 @@ parseVarDecs omap = fmap conv (parseCommaSeparated $ parseVarDecSet omap) where
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 
 data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] 
-    | Define Token VarDec Expr | Predicate Token Token Expr VarDec Expr 
+    | Define Token VarDec Expr Expr | Predicate Token Token Expr VarDec Expr
+    | DataType Token Expr | Undef Token Expr
     | InfixDecla Bool Token Int Token deriving (Show)
 parseDeclaBody:: OpeMap -> String -> State [Token] (Maybe Decla)
 parseDeclaBody omap "axiom" = return (Just Axiom)
@@ -164,12 +174,17 @@ parseDeclaBody omap "theorem" = return (Just Theorem)
 parseDeclaBody omap "define" = return (Just Define)
     <++> parseIdent
     <++> parseParenVarDecs omap
+    <::> parseSymbol ":" <++> parseExpr omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
 parseDeclaBody omap "predicate" = return (Just Predicate)
     <++> parseIdent
     <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap<::> parseSymbol "]"
     <++> parseParenVarDecs omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
+parseDeclaBody omap "data" = return (Just DataType)
+    <++> parseIdent <::> parseSymbol "=" <++> parseExpr omap
+parseDeclaBody omap "undef" = return (Just Undef)
+    <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap
 parseDeclaBody omap "infixl" = return (Just $ InfixDecla True)
     <++> parseAnySymbol <++> parseNumber <::> parseSymbol "=>" <++> parseIdent
 parseDeclaBody omap "infixr" = return (Just $ InfixDecla False)

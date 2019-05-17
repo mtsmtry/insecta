@@ -6,6 +6,7 @@ import qualified Data.Map as M
 import Control.Monad.State
 import Parse
 import Engine
+import Type
 
 tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize

@@ -153,7 +153,6 @@ simplify m e = maybe e (simplify m) $ step m e where
     applyByHeadList _ [] _ = Nothing
     applyByHeadList m (ExprHead f s:xs) e = (M.lookup (showToken f) m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
 
-
 showSteps:: Expr -> [Expr]
 showSteps x = showSteps' [x] x where
     showSteps':: [Expr] -> Expr -> [Expr]
@@ -176,12 +175,3 @@ showExpr (FuncExpr h as) = if isAlpha (head f) || length as /= 2
 extractMaybe:: [Maybe a] -> [a]
 extractMaybe [] = []
 extractMaybe (x:xs) = maybe (extractMaybe xs) (:extractMaybe xs) x
-
-buildProgram:: String -> ((RuleMap, RuleMap, Simplicity), OpeMap)
-buildProgram str = (makeRuleMap props, omap) where
-    ((declas, omap), rest) = runState parseProgram . tokenize $ str
-    props = extractMaybe $ map toProp declas
-    toProp:: Decla -> Maybe Expr
-    toProp (Axiom _ p) = Just p
-    toProp (Theorem _ p _) = Just p
-    toProp _ = Nothing
