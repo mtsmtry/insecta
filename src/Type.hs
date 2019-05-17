@@ -42,12 +42,16 @@ makeFuncType args ret = FuncExpr (makeExprHead "->") [(FuncExpr $ makeExprHead "
 addIdent:: String -> Expr -> TypeMap -> Writer [Message] TypeMap
 addIdent i t m = return $ M.insert i t m
 
+conjMaybe:: [Maybe a] -> Maybe [a]
+conjMaybe [] = Just []
+conjMaybe (x:xs) = (:) <$> x <*> conjMaybe xs
+
 makeTypeMap:: [Decla] -> TypeMap -> Writer [Message] TypeMap
 makeTypeMap [] = addIdent "Prop" (makeIdentExpr "Type")
 makeTypeMap (x:xs) = (>>= makeTypeMap xs) . (getType x) where
     getType:: Decla -> TypeMap -> Writer [Message] TypeMap
     getType (DataType (p, t) def) = \m-> do
-        m' <- addIdent t (makeIdentExpr t) m
+        m' <- addIdent t (makeIdentExpr "Type") m
         addCstr cstrs m'
         where
         thisType = makeIdentExpr t
@@ -57,10 +61,11 @@ makeTypeMap (x:xs) = (>>= makeTypeMap xs) . (getType x) where
         addCstr (IdentExpr (_, i):xs) m = addIdent i thisType m >>= addCstr xs
         addCstr (FuncExpr (PureExprHead (_, i)) as:xs) m = do
             argsm <- mapM (evalType m) as
-            args <- writer (extractMaybe argsm, []) -- todo
-            let cstrType = makeFuncType args thisType
-            m' <- addIdent i cstrType m
-            addCstr xs m'
+            let run x = maybe (return m) x (conjMaybe argsm)
+            run $ \args-> do
+                let cstrType = makeFuncType args thisType
+                m' <- addIdent i cstrType m
+                addCstr xs m'
         addCstr e m = error $ show e
     getType (Undef (_, t) e) = addIdent t e
     getType (Define (_, t) args ret def) = addIdent t (makeFuncType (toTypes args) ret) where
