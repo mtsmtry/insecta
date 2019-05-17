@@ -36,21 +36,32 @@ extractArgs s e@(FuncExpr (PureExprHead (_, s')) as) = if s == s' then concatMap
 extractArgs s e = [e]
 
 makeFuncType:: [Expr] -> Expr -> Expr
-makeFuncType args ret = FuncExpr (makeExprHead "tuple") [(FuncExpr $ makeExprHead "->") args, ret]
+makeFuncType [arg] ret = FuncExpr (makeExprHead "->") [arg, ret]
+makeFuncType args ret = FuncExpr (makeExprHead "->") [(FuncExpr $ makeExprHead "tuple") args, ret]
 
 addIdent:: String -> Expr -> TypeMap -> Writer [Message] TypeMap
 addIdent i t m = return $ M.insert i t m
 
 makeTypeMap:: [Decla] -> TypeMap -> Writer [Message] TypeMap
 makeTypeMap [] = addIdent "Prop" (makeIdentExpr "Type")
-makeTypeMap (x:xs) = \m -> getType x m >>= makeTypeMap xs where
+makeTypeMap (x:xs) = (>>= makeTypeMap xs) . (getType x) where
     getType:: Decla -> TypeMap -> Writer [Message] TypeMap
-    getType (DataType (p, t) def) = addCstr cstrs where
+    getType (DataType (p, t) def) = \m-> do
+        m' <- addIdent t (makeIdentExpr t) m
+        addCstr cstrs m'
+        where
         thisType = makeIdentExpr t
         cstrs = extractArgs "|" def
         addCstr:: [Expr] -> TypeMap -> Writer [Message] TypeMap
+        addCstr [] m = return m
         addCstr (IdentExpr (_, i):xs) m = addIdent i thisType m >>= addCstr xs
-        addCstr (FuncExpr (PureExprHead (_, i)) as:xs) m = addIdent i thisType m >>= addCstr xs
+        addCstr (FuncExpr (PureExprHead (_, i)) as:xs) m = do
+            argsm <- mapM (evalType m) as
+            args <- writer (extractMaybe argsm, []) -- todo
+            let cstrType = makeFuncType args thisType
+            m' <- addIdent i cstrType m
+            addCstr xs m'
+        addCstr e m = error $ show e
     getType (Undef (_, t) e) = addIdent t e
     getType (Define (_, t) args ret def) = addIdent t (makeFuncType (toTypes args) ret) where
     getType _ = return
