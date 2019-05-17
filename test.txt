@@ -7,7 +7,7 @@ infixr ^ 12 => pow
 infixl && 5 => and
 
 data N = O | S(N)
-data A = D | F(TEST)
+undef +: N->N->N
 
 axiom (a: N) {
     a + 0 >>= a

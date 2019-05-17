@@ -10,31 +10,6 @@ import Control.Arrow
 import Control.Applicative
 import Parse
 
-makeRules:: [Expr] -> Writer [Message] ([Rule], [Rule])
-makeRules [] = return ([], [])
-makeRules (x:xs) = do
-    result <- makeRule x
-    (ms, mi) <- makeRules xs
-    return $ case result of 
-        Nothing-> (ms, mi)
-        Just (isStep, r)-> if isStep then (r:ms, mi) else (ms, r:mi) 
-    where 
-    -- expression -> (is step rule, rule)
-    makeRule:: Expr -> Writer [Message] (Maybe (Bool, Rule))
-    makeRule (FuncExpr (PureExprHead pk@(p, kind)) [a, b]) = case kind of
-        ">>=" -> return $ Just (True, (a, b))
-        "->" -> return $ Just (False, (a, b))
-        f -> writer (Nothing, [Message pk "Wrong function"])
-
-type RuleMap = M.Map String [Rule] 
-toRuleMap:: [Rule] -> RuleMap
-toRuleMap rs = toRuleMap' M.empty $ groupBy equalsHead rs where
-    equalsHead (FuncExpr h _, _) (FuncExpr h' _, _) = showHead h == showHead h'
-    getHead:: [Rule] -> String
-    getHead ((FuncExpr h _, _):_) = showHead h
-    toRuleMap':: RuleMap -> [[Rule]] -> RuleMap
-    toRuleMap' = foldl (\m r-> M.insert (getHead r) r m)
-
 type Simplicity = [String]
 makeSimp:: Simplicity -> [Rule] -> Writer [Message] Simplicity
 makeSimp m [] = return m
@@ -55,14 +30,6 @@ makeSimp m ((a, b):rs) = do
     insertAt:: a -> Int -> [a] -> [a]
     insertAt x 0 as = x:as
     insertAt x i (a:as) = a:insertAt x (i - 1) as
-
-makeRuleMap:: [Expr] -> Writer [Message] (RuleMap, RuleMap, Simplicity)
-makeRuleMap xs = do
-    (a, b) <- makeRules xs
-    simp <- makeSimp [] a
-    let toAppSimp (a, b) = (appSimp simp a, appSimp simp b)
-    let toMap = toRuleMap . map toAppSimp
-    return (toMap a, toMap b, simp) 
 
 extractRewrite:: Expr -> Expr
 extractRewrite (Rewrite _ a _) = extractRewrite a
@@ -128,6 +95,7 @@ applyArgs f xs = applyArgs' xs [] where
     applyArgs' [] _ = Nothing
     applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
 
+type RuleMap = M.Map String [Rule] 
 simplify:: RuleMap -> Expr -> Expr
 simplify m e = maybe e (simplify m) $ step m e where
     step:: RuleMap -> Expr -> Maybe Expr
@@ -173,7 +141,19 @@ showExpr (NumberExpr _ n) = show n
 showExpr (FuncExpr h as) = if isAlpha (head f) || length as /= 2 
     then f ++ "(" ++ intercalate "," (map showExpr as) ++ ")"
     else let [a, b] = as in showExpr a ++ f ++ showExpr b where f = showHead h
- 
+
+getHeadStr:: ExprHead -> PosStr
+getHeadStr (ExprHead ps _) = ps
+getHeadStr (PureExprHead ps) = ps
+
+getExprPos (StringExpr (p, _)) = p
+getExprPos (IdentExpr (p, _)) = p
+getExprPos (NumberExpr p _) = p
+getExprPos (FuncExpr h _) = fst $ getHeadStr h
+
+showCodeExpr:: Expr -> PosStr
+showCodeExpr e = (getExprPos e, showExpr e)
+
 extractMaybe:: [Maybe a] -> [a]
 extractMaybe [] = []
 extractMaybe (x:xs) = maybe (extractMaybe xs) (:extractMaybe xs) x
