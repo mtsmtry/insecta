@@ -10,14 +10,17 @@ import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
 
-data Position = Position Int Int deriving (Eq, Show)
+data Position = Position Int Int | NonePosition deriving (Eq, Show)
 data Token = EndLine | Ident String | Number Int 
     | Literal String | LiteralOne Char | Symbol String 
     | Comma | ParenOpen | ParenClose | Error String String deriving (Eq, Show)
 data PosToken = PosToken Position Token deriving (Eq, Show)
-tokenize :: Position -> String -> [PosToken]
-tokenize p [] = []
-tokenize p all = let (x, xs, p') = getToken p all in maybe id (:) x (tokenize p' xs) where
+
+tokenize:: String -> [PosToken]
+tokenize = tokenize' $ Position 1 1 where
+    tokenize' :: Position -> String -> [PosToken]
+    tokenize' p [] = []
+    tokenize' p all = let (x, xs, p') = getToken p all in maybe id (:) x (tokenize' p' xs) where
     getToken :: Position -> String -> (Maybe PosToken, String, Position)
     getToken p [] = (Nothing, [], p)
     getToken p (x:xs)
@@ -52,49 +55,60 @@ tokenize p all = let (x, xs, p') = getToken p all in maybe id (:) x (tokenize p'
 
 type Rule = (Expr, Expr)
 type OpeMap = M.Map String (Int, Bool)
-data ExprHead = ExprHead Token Int | PureExprHead Token deriving (Show, Eq)
-data Expr = IdentExpr String | FuncExpr ExprHead [Expr] | StringExpr String | NumberExpr Int | Rewrite Rule Expr Expr deriving (Show, Eq)
+data ExprHead = ExprHead Position String Int | PureExprHead Position String deriving (Show, Eq)
+data Expr = IdentExpr Position String | FuncExpr ExprHead [Expr] 
+        | StringExpr Position String | NumberExpr Position Int | Rewrite Rule Expr Expr deriving (Show, Eq)
+
+showToken:: Token -> String
+showToken (Symbol s) = s
+showToken (Ident s) = s
+
+showHead:: ExprHead -> String
+showHead (ExprHead _ t _) = t
+showHead (PureExprHead _ t) = t
+        
 parseExpr:: OpeMap -> State [PosToken] (Maybe Expr)
 parseExpr omap = state $ \ts-> parseExpr ts [] [] where
     -- (input tokens, operation stack, expression queue) -> (expression, rest token)
-    parseExpr:: [PosToken] -> [(Token, Int)] -> [Expr] -> (Maybe Expr, [PosToken])
+    parseExpr:: [PosToken] -> [(PosToken, Int)] -> [Expr] -> (Maybe Expr, [PosToken])
     parseExpr [] s q = (Just $ head $ makeExpr s q, [])
-    parseExpr all@(px:xs) s q = let PosToken p x = px in case x of
+    parseExpr all@(px@(PosToken p x):xs) s q = case x of
         Error t m   -> (Nothing, all)
-        Number n    -> maybeEnd $ parseExpr xs s (NumberExpr n:q)
+        Number n    -> maybeEnd $ parseExpr xs s (NumberExpr p n:q)
         Ident i     -> maybeEnd $ if xs /= [] && getToken (head xs) == ParenOpen
-            then parseExpr xs ((x, 1):s) q
-            else parseExpr xs s (IdentExpr i:q)
-        ParenOpen   -> maybeEnd $ parseExpr xs ((x, 2):s) q -- 2 args for end condition
+            then parseExpr xs ((px, 1):s) q
+            else parseExpr xs s (IdentExpr p i:q)
+        ParenOpen   -> maybeEnd $ parseExpr xs ((px, 2):s) q -- 2 args for end condition
         ParenClose  -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
-            (opes, _:rest) = span ((/= ParenOpen) . fst) s
+            (opes, _:rest) = span ((not <$> isParenOpen) . fst) s
         Comma       -> maybeEnd $ parseExpr xs rest $ makeExpr opes q where
-            isIdent x    = case x of Ident _ -> True; _ -> False
+            isIdent = \case PosToken _ (Ident _) -> True; _ -> False
             incrementArg = apply (isIdent . fst) (fmap (1+))
-            (opes, rest) = incrementArg <$> span ((/= ParenOpen) . fst) s
+            (opes, rest) = incrementArg <$> span ((not <$> isParenOpen) . fst) s
         Symbol ope  -> case getOpe ope of 
-            Just _      -> parseExpr xs ((x, 2):rest) $ makeExpr opes q where
+            Just _      -> parseExpr xs ((px, 2):rest) $ makeExpr opes q where
                 (opes, rest) = span (precederEq ope . fst) s
-            Nothing     -> result 
+            Nothing     -> result
         where
+            isParenOpen = \case PosToken _ ParenOpen -> True; _ -> False
             result = (Just $ head $ makeExpr s q, all)
             maybeEnd a = if sum (map ((-1+) . snd) s) + 1 == length q then result else a
-    getToken (PosToken _ t) = t
     -- ((operator or function token, argument number), input) -> output
-    makeExpr:: [(Token, Int)] -> [Expr] -> [Expr]
+    makeExpr:: [(PosToken, Int)] -> [Expr] -> [Expr]
     makeExpr [] q = q
-    makeExpr ((t, n):os) q = makeExpr os $ FuncExpr (PureExprHead t) args:rest
+    makeExpr ((PosToken p t, n):os) q = makeExpr os $ FuncExpr (PureExprHead p $ showToken t) args:rest
         where (args, rest) = (reverse $ take n q, drop n q)
+    getToken (PosToken _ t) = t
     -- apply 'f' to a element that satisfy 'cond' for the first time
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
     -- String -> (preceed, left associative)
     getOpe = flip M.lookup $ M.union buildInOpe omap
     buildInOpe = M.fromList [(">>=", (0, True)), ("->", (1, True)), ("|", (2, True))]
-    precederEq:: String -> Token -> Bool
-    precederEq s ParenOpen = False
-    precederEq s (Ident _) = True
-    precederEq s (Symbol t) = precederEq' $ map getOpe' [s, t] where
+    precederEq:: String -> PosToken -> Bool
+    precederEq s (PosToken _ ParenOpen) = False
+    precederEq s (PosToken _ (Ident _)) = True
+    precederEq s (PosToken _ (Symbol t)) = precederEq' $ map getOpe' [s, t] where
         precederEq' [(aPre, aLeft), (bPre, bLeft)] = bLeft && ((aLeft && aPre <= bPre) || aPre < bPre)
         getOpe' = fromMaybe (0, True) . getOpe
 

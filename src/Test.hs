@@ -26,7 +26,7 @@ simplifyTest prg str = "out:" ++ out ++ "\n"
         -- ++ "props:" ++ show declas ++ "\n"
         -- ++ "rules:" ++ show (makeRules props) ++ "\n" 
         where
-    ((stepRule, implRule, simpList), omap) = buildProgram prg
+    ((stepRule, implRule, simpList), omap, tmap) = buildProgram prg
     expr' = (evalState $ parseExpr omap) (tokenize str)
     expr'' = fromMaybe (error "wrong expr") expr'
     expr = appSimp simpList expr''
@@ -40,8 +40,6 @@ unifyTest str = out where
     exprs = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
     [a, b] = exprs
     out = show $ unify a b
-
-a = unify (IdentExpr "a") (Rewrite (IdentExpr "", IdentExpr "") (IdentExpr "x") (IdentExpr "y"))
 
 test x = forever $ getLine >>= (putStrLn . x)
 -- testFunc = test $ parserTest parseVarDecs 

@@ -8,8 +8,6 @@ infixl && 5 => and
 
 data N = O | S(N)
 
-undef add: 
-
 axiom () {
     a + 0 >>= a
 }
