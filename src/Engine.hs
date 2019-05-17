@@ -99,7 +99,7 @@ applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g
         0 -> Nothing
         1 -> maybe Nothing makeExpr $ applyDiff d x where
             (xs', x:xs) = splitAt idx args
-            makeExpr t = Just $ FuncExpr f ((map fst xs') ++ t:(map fst xs))
+            makeExpr t = Just $ FuncExpr f (map fst xs' ++ t:map fst xs)
         _ -> d pair
     else d pair where 
         args = zip as bs

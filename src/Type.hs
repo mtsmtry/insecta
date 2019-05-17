@@ -14,7 +14,7 @@ import Engine
 type TypeMap = M.Map String Expr
 
 evalType:: TypeMap -> Expr -> Writer [Message] (Maybe Expr)
-evalType tmap (IdentExpr (_, i)) = return $ M.lookup i tmap
+evalType tmap (IdentExpr ph@(_, h)) =  maybe (writer (Nothing, [Message ph "Not defined"])) (return . Just) (M.lookup h tmap)
 evalType tmap (FuncExpr (PureExprHead ph@(p, h)) as) = f $ \case
     FuncExpr (PureExprHead (_, "implies")) [FuncExpr (PureExprHead (_, "tuple")) ts, b]->
         checkArgs ts as >>= \x-> return (if x then ftype else Nothing)
