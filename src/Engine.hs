@@ -64,30 +64,6 @@ equals (NumberExpr _ n) (NumberExpr _ m) = n == m
 equals (StringExpr a) (StringExpr b) = a == b
 equals _ _ = False
 
-applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
-applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g 
-    then case num of
-        0 -> Nothing
-        1 -> maybe Nothing makeExpr $ applyDiff d x where
-            (xs', x:xs) = splitAt idx args
-            makeExpr t = Just $ FuncExpr f (map fst xs' ++ t:map fst xs)
-        _ -> d pair
-    else d pair where 
-        args = zip as bs
-        es = fmap (uncurry equals) args
-        (idx, num) = encount True es
-        -- (element, list) -> (index of the first encountered element, number of encounters)
-        encount:: Eq a => a -> [a] -> (Int, Int)
-        encount = encount' (-1, 0) where
-            encount' p _ [] = p
-            encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
-
-type Derivater = (Expr, Expr) -> Maybe Expr
-derviateDiff:: Rule -> Derivater
-derviateDiff d = applyDiff $ derviate d where
-    derviate:: Rule -> Derivater
-    derviate (a, b) (ea, eb) = unify a ea >>= \m-> unify b eb >>= const (Just $ assign m eb)
-
 appSimp :: Simplicity -> Expr -> Expr
 appSimp m (FuncExpr h as) = FuncExpr h' $ map (appSimp m) as where
     h' = case h of PureExprHead pt@(_, t) -> ExprHead pt $ fromMaybe 0 $ elemIndex t m; _-> h
@@ -128,6 +104,35 @@ simplify m e = maybe e (simplify m) $ step m e where
     applyByHeadList:: RuleMap -> [ExprHead] -> Expr -> Maybe Expr
     applyByHeadList _ [] _ = Nothing
     applyByHeadList m (ExprHead (_, f) s:xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
+
+type Derivater = (Expr, Expr) -> Maybe Expr
+derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
+derivate m pair@(FuncExpr h as, goal) = M.lookup (showHead h) m 
+    >>= foldr ((<|>) . derivateByRule pair) Nothing where
+
+    applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
+    applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g 
+        then case num of
+            0 -> Nothing
+            1 -> applyDiff d x >>= makeExpr where
+                (xs', x:xs) = splitAt idx args
+                makeExpr t = Just $ FuncExpr f (map fst xs' ++ t:map fst xs)
+            _ -> d pair
+        else d pair where
+            args = zip as bs
+            es = fmap (uncurry equals) args
+            (idx, num) = encount True es
+            -- (element, list) -> (index of the first encountered element, number of encounters)
+            encount:: Eq a => a -> [a] -> (Int, Int)
+            encount = encount' (-1, 0) where
+                encount':: Eq a => (Int, Int) -> a -> [a] -> (Int, Int)
+                encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
+                encount' p _ [] = p
+    derivateByRule:: Rule -> Derivater
+    derivateByRule d = applyDiff $ derivate' d where
+        derivate':: Rule -> Derivater
+        derivate' (a, b) (ea, eb) = unify a ea >>= \m-> unify b eb >>= const (Just $ assign m eb)
+derivate _ _ = Nothing
 
 showSteps:: Expr -> [String]
 showSteps x = map showExprOldest $ reverse $ showSteps' [x] x where

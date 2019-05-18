@@ -39,14 +39,27 @@ simplifyTest prg str = ""
     out = intercalate "\n=" steps
     out' = intercalate "\n=" steps
 
+parseExprs str = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
+
 unifyTest:: String -> String
 unifyTest str = out where
-    exprs = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
+    exprs = parseExprs str
     [a, b] = exprs
     out = show $ unify a b
 
+derivateTest:: String -> String -> String
+derivateTest prg str = out' where
+    ((stepRule, implRule, simpList), omap, tmap, msgs) = buildProgram prg
+    exprs = parseExprs str
+    [a, b] = exprs
+    out = show $ derivate implRule (a, b)
+    out' = out ++ "implRule:" ++ show implRule ++ "\n" ++ "stepRule:" ++ show stepRule ++ "\n" ++ "msgs:" ++ show msgs ++ "\n"
+
 test x = forever $ getLine >>= (putStrLn . x)
 testFunc2 = test $ parserTest $ parseDecla M.empty
+testFunc3 = do
+    file <- readFile "test.txt"
+    test $ derivateTest file
 testFunc = do
     file <- readFile "test.txt"
     test $ simplifyTest file
