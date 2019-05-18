@@ -57,9 +57,9 @@ derivateTest prg str = out' where
 
 test x = forever $ getLine >>= (putStrLn . x)
 testFunc2 = test $ parserTest $ parseDecla M.empty
-testFunc3 = do
+testFunc = do
     file <- readFile "test.txt"
     test $ derivateTest file
-testFunc = do
+testFunc4 = do
     file <- readFile "test.txt"
     test $ simplifyTest file

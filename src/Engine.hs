@@ -108,7 +108,7 @@ simplify m e = maybe e (simplify m) $ step m e where
 type Derivater = (Expr, Expr) -> Maybe Expr
 derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
 derivate m pair@(FuncExpr h as, goal) = M.lookup (showHead h) m 
-    >>= foldr ((<|>) . derivateByRule pair) Nothing where
+    >>= foldr ((<|>) . (flip derivateByRule) pair) Nothing where
 
     applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
     applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g 
@@ -128,6 +128,7 @@ derivate m pair@(FuncExpr h as, goal) = M.lookup (showHead h) m
                 encount':: Eq a => (Int, Int) -> a -> [a] -> (Int, Int)
                 encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
                 encount' p _ [] = p
+    applyDiff d pair = d pair
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
