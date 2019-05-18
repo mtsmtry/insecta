@@ -1,4 +1,4 @@
-module Engine where
+module Rewriter where
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -8,7 +8,8 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
-import Parse
+import Parser
+import Library
 
 extractRewrite:: Expr -> Expr
 extractRewrite (Rewrite _ a _) = extractRewrite a
@@ -20,7 +21,7 @@ unify p t = if b then Just m else Nothing where
     (b, m) = (runState $ unifym p t) M.empty
     unifym:: Expr -> Expr -> State (M.Map String Expr) Bool
     unifym Rewrite{} _ = error "Do not use Rewrite in a rule"
-    unifym e (Rewrite _ a _) = unifym e a
+    unifym e (Rewrite _ a _) = unifym e a -- use newer
     unifym (IdentExpr (_, var)) t = state $ \m-> maybe (True, M.insert var (extractRewrite t) m) (\x-> (x `equals` t, m)) $ M.lookup var m
     unifym (NumberExpr _ n) (NumberExpr _ n') = return $ n == n'
     unifym NumberExpr{} _ = return False
@@ -36,11 +37,15 @@ assign m e@(IdentExpr (_, var)) = fromMaybe e $ M.lookup var m
 assign m (FuncExpr f as) = FuncExpr f $ map (assign m) as
 assign m e = e
 
+-- equals on math semantic
+-- ignore code position and rewrite
 equals:: Expr -> Expr -> Bool
 equals (IdentExpr (_, a)) (IdentExpr (_, b)) = a == b
 equals (FuncExpr f as) (FuncExpr g bs) = (showHead f == showHead g) && all (uncurry equals) (zip as bs)
 equals (NumberExpr _ n) (NumberExpr _ m) = n == m
 equals (StringExpr (_, a)) (StringExpr (_, b)) = a == b
+equals Rewrite{} _ = error "Can not use Rewrite"
+equals _ Rewrite{} = error "Can not use Rewrite"
 equals _ _ = False
 
 -- functions order by simplicity
@@ -132,7 +137,9 @@ derivate m = applyDiff derivateByRuleList where
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
-        derivate' (ra, rb) (ta, tb) = unify ra ta >>= \m-> if assign m rb `equals` tb then Just tb else Nothing
+        derivate' r@(ra, rb) (ta, tb) = unify ra ta >>= \m-> if assign m rb `equals` tb 
+            then Just $ Rewrite r ta tb
+            else Nothing
 
 showSteps:: Expr -> [String]
 showSteps x = map showExprOldest $ reverse $ showSteps' [x] x where

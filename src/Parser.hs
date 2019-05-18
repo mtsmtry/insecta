@@ -1,4 +1,4 @@
-module Parse where
+module Parser where
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -9,6 +9,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
+import Library
 
 -- Position(Line, Char)
 data Position = Position Int Int | NonePosition deriving (Show)
@@ -220,14 +221,21 @@ data VarDecSet = VarDecSet [PosStr] Expr deriving (Show)
 parseVarDecSet:: OpeMap -> State [PosToken] (Maybe VarDecSet)
 parseVarDecSet omap = return (Just VarDecSet) <++> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
-data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr [Statement] | BlockStm String Expr [Statement] deriving (Show)
+parseMultiLineStm:: OpeMap -> State [PosToken] (Maybe Statement)
+parseMultiLineStm omap = return (Just BlockStm) <++> parseSequence (parseStatement omap)
+
+data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr Statement | BlockStm [Statement] deriving (Show)
 parseStatement:: OpeMap -> State [PosToken] (Maybe Statement)
-parseStatement omap = parseIdent >>= \case
-    Just (_, "step") -> return (Just StepStm) <++> parseExpr omap
-    Just (_, "impl") -> return (Just ImplStm) <++> parseExpr omap
-    Just (_, "assume") -> return (Just AssumeStm) <++> parseExpr omap <++> parseBlock
-    _ -> return Nothing 
-    where parseBlock = return (Just id) <::> parseSymbol "{" <++> parseSequence (parseStatement omap) <::> parseSymbol "}"
+parseStatement omap = parseSymbol "{" >>= \case 
+    Just{} -> parseBlock
+    Nothing -> parseLineStm
+    where 
+    parseBlock = return (Just BlockStm) <++> parseSequence (parseStatement omap) <::> parseSymbol "}"
+    parseLineStm = parseIdent >>= \case
+        Just (_, "step") -> return (Just StepStm) <++> parseExpr omap
+        Just (_, "impl") -> return (Just ImplStm) <++> parseExpr omap
+        Just (_, "assume") -> return (Just AssumeStm) <++> parseExpr omap <++> parseStatement omap
+        _ -> return Nothing 
 
 type VarDec = [(PosStr, Expr)]
 parseVarDecs:: OpeMap -> State [PosToken] (Maybe VarDec)
@@ -240,10 +248,11 @@ parseVarDecs omap = fmap conv parse where
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 
 -- declaration parsers
-data Decla = Axiom VarDec Expr | Theorem VarDec Expr [Statement] 
+data Decla = Axiom VarDec Expr | Theorem VarDec Expr Statement
     | Define PosStr VarDec Expr Expr | Predicate PosStr PosStr Expr VarDec Expr
     | DataType PosStr Expr | Undef PosStr Expr
     | InfixDecla Bool PosStr Int PosStr deriving (Show)
+
 parseDeclaBody:: OpeMap -> String -> State [PosToken] (Maybe Decla)
 parseDeclaBody omap "axiom" = return (Just Axiom)
     <++> parseParenVarDecs omap
@@ -252,7 +261,7 @@ parseDeclaBody omap "theorem" = return (Just Theorem)
     <++> parseParenVarDecs omap
     <::> parseSymbol "{" 
     <++> parseExpr omap
-    <::> parseToken (Ident "proof") <::> parseSymbol ":" <++> parseSequence (parseStatement omap)
+    <::> parseToken (Ident "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap
     <::> parseSymbol "}"
 parseDeclaBody omap "define" = return (Just Define)
     <++> parseIdent

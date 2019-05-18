@@ -4,9 +4,9 @@ import Data.List
 import Data.Maybe
 import qualified Data.Map as M
 import Control.Monad.State
-import Parse
-import Engine
-import Type
+import Parser
+import Rewriter
+import Analyzer
 
 tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
