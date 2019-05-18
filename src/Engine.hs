@@ -42,7 +42,7 @@ unify p t = if b then Just m else Nothing where
     unifym:: Expr -> Expr -> State (M.Map String Expr) Bool
     unifym Rewrite{} _ = error "Do not use Rewrite in a rule"
     unifym e (Rewrite _ a _) = unifym e a
-    unifym (IdentExpr (_, var)) t = state $ \m-> maybe (True, M.insert var (extractRewrite t) m) (\x-> (x==t, m)) $ M.lookup var m
+    unifym (IdentExpr (_, var)) t = state $ \m-> maybe (True, M.insert var (extractRewrite t) m) (\x-> (x `equals` t, m)) $ M.lookup var m
     unifym (NumberExpr _ n) (NumberExpr _ n') = return $ n == n'
     unifym NumberExpr{} _ = return False
     unifym (FuncExpr f ax) (FuncExpr f' ax') = (and $ unifym' ax ax') (showHead f == showHead f') where
@@ -59,9 +59,9 @@ assign m e = e
 
 equals:: Expr -> Expr -> Bool
 equals (IdentExpr (_, a)) (IdentExpr (_, b)) = a == b
-equals (FuncExpr f as) (FuncExpr g bs) = (showHead f == showHead g) && all (uncurry (==)) (zip as bs)
+equals (FuncExpr f as) (FuncExpr g bs) = (showHead f == showHead g) && all (uncurry equals) (zip as bs)
 equals (NumberExpr _ n) (NumberExpr _ m) = n == m
-equals (StringExpr a) (StringExpr b) = a == b
+equals (StringExpr (_, a)) (StringExpr (_, b)) = a == b
 equals _ _ = False
 
 appSimp :: Simplicity -> Expr -> Expr
@@ -107,19 +107,18 @@ simplify m e = maybe e (simplify m) $ step m e where
 
 type Derivater = (Expr, Expr) -> Maybe Expr
 derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
-derivate m pair = applyDiff derivateByRuleList pair where
+derivate m = applyDiff derivateByRuleList where
     applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
-    applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if showHead f == showHead g 
+    applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if showHead f == showHead g && length as == length bs
         then case num of
-            0 -> if length as == 1 then d (head as, head bs) else Nothing
-            1 -> applyDiff d x >>= makeExpr where
+            0 -> Nothing-- if length as == 1 then d (head as, head bs) else Nothing
+            1 -> d x >>= \t-> Just $ FuncExpr f (map snd xs' ++ t:map snd xs) where
                 (xs', x:xs) = splitAt idx args
-                makeExpr t = Just $ FuncExpr f (map snd xs' ++ t:map snd xs)
             _ -> d pair
         else d pair where
             args = zip as bs
             es = fmap (uncurry equals) args
-            (idx, num) = encount True es
+            (idx, num) = encount False es
             -- (element, list) -> (index of the first encountered element, number of encounters)
             encount:: Eq a => a -> [a] -> (Int, Int)
             encount = encount' (-1, 0) where
@@ -130,11 +129,11 @@ derivate m pair = applyDiff derivateByRuleList pair where
     derivateByRuleList::Derivater
     derivateByRuleList pair@(FuncExpr h as, goal) = M.lookup (showHead h) m 
         >>= foldr ((<|>) . (flip derivateByRule) pair) Nothing
+    derivateByRuleList _ = Nothing
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
-        derivate' (a, b) (ea, eb) = unify a ea >>= \m-> unify b eb >>= const (Just $ assign m eb)
-derivate _ _ = Nothing
+        derivate' (ra, rb) (ta, tb) = unify ra ta >>= \m-> if assign m rb `equals` tb then Just tb else Nothing
 
 showSteps:: Expr -> [String]
 showSteps x = map showExprOldest $ reverse $ showSteps' [x] x where
