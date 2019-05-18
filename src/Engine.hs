@@ -107,16 +107,14 @@ simplify m e = maybe e (simplify m) $ step m e where
 
 type Derivater = (Expr, Expr) -> Maybe Expr
 derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
-derivate m pair@(FuncExpr h as, goal) = M.lookup (showHead h) m 
-    >>= foldr ((<|>) . (flip derivateByRule) pair) Nothing where
-
+derivate m pair = applyDiff derivateByRuleList pair where
     applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
-    applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g 
+    applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if showHead f == showHead g 
         then case num of
-            0 -> Nothing
+            0 -> if length as == 1 then d (head as, head bs) else Nothing
             1 -> applyDiff d x >>= makeExpr where
                 (xs', x:xs) = splitAt idx args
-                makeExpr t = Just $ FuncExpr f (map fst xs' ++ t:map fst xs)
+                makeExpr t = Just $ FuncExpr f (map snd xs' ++ t:map snd xs)
             _ -> d pair
         else d pair where
             args = zip as bs
@@ -129,6 +127,9 @@ derivate m pair@(FuncExpr h as, goal) = M.lookup (showHead h) m
                 encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
                 encount' p _ [] = p
     applyDiff d pair = d pair
+    derivateByRuleList::Derivater
+    derivateByRuleList pair@(FuncExpr h as, goal) = M.lookup (showHead h) m 
+        >>= foldr ((<|>) . (flip derivateByRule) pair) Nothing
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
