@@ -93,6 +93,8 @@ appSimp m (FuncExpr h as) = FuncExpr h' $ map (appSimp m) as where
     h' = case h of PureExprHead pt@(_, t) -> ExprHead pt $ fromMaybe 0 $ elemIndex t m; _-> h
 appSimp _ e = e
 
+-- どれか一つの引数に効果を適用し、同じ順番で引数を返す
+-- 適用できる引数がなかったときはNothingを返す
 applyArgs:: (Expr -> Maybe Expr) -> [Expr] -> Maybe [Expr]
 applyArgs f xs = applyArgs' xs [] where
     applyArgs':: [Expr] -> [Expr] -> Maybe [Expr]
@@ -127,24 +129,45 @@ simplify m e = maybe e (simplify m) $ step m e where
     applyByHeadList _ [] _ = Nothing
     applyByHeadList m (ExprHead (_, f) s:xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
 
-showSteps:: Expr -> [Expr]
-showSteps x = showSteps' [x] x where
+showSteps:: Expr -> [String]
+showSteps x = map showExprOldest $ reverse $ showSteps' [x] x where
     showSteps':: [Expr] -> Expr -> [Expr]
     showSteps' p e = maybe p (\x-> showSteps' (x:p) x) $ nextStep e
 
     nextStep:: Expr -> Maybe Expr
-    nextStep (Rewrite _ a b) = Just a
+    nextStep (Rewrite r a b) = Just $ maybe a (Rewrite r a) $ nextStep b
     nextStep (FuncExpr h as) = applyArgs nextStep as >>= Just . FuncExpr h
     nextStep _ = Nothing
 
+showFuncExpr:: (Expr -> String) -> ExprHead -> [Expr] -> String
+showFuncExpr fshow h as = if isAlpha (head f) || length as /= 2 
+    then f ++ "(" ++ intercalate "," (map fshow as) ++ ")"
+    else let [a, b] = as in fshow a ++ f ++ fshow b where f = showHead h
+
 showExpr:: Expr -> String
-showExpr (Rewrite _ a b) = showExpr b
+showExpr (Rewrite _ a b) = error "Can not use Rewrite"
 showExpr (StringExpr (_, s)) = "\"" ++ s ++ "\"" 
 showExpr (IdentExpr (_, x)) = x
-showExpr (NumberExpr _ n) = show n
-showExpr (FuncExpr h as) = if isAlpha (head f) || length as /= 2 
-    then f ++ "(" ++ intercalate "," (map showExpr as) ++ ")"
-    else let [a, b] = as in showExpr a ++ f ++ showExpr b where f = showHead h
+showExpr (NumberExpr _ n) = show n 
+
+showExprOldest:: Expr -> String
+showExprOldest (Rewrite _ a b) = showExprOldest b
+showExprOldest (FuncExpr h as) = showFuncExpr showExprOldest h as
+showExprOldest e = showExpr e
+
+showExprLatest:: Expr -> String
+showExprLatest (Rewrite _ a b) = showExprLatest a
+showExprLatest (FuncExpr h as) = showFuncExpr showExprLatest h as
+showExprLatest e = showExpr e
+
+showExprAsRewrites:: Expr -> String
+showExprAsRewrites e@Rewrite{} = "[" ++ intercalate "," steps ++ "]" where
+    steps = map showExprAsRewrites $ expandRewrite e
+    expandRewrite:: Expr -> [Expr]
+    expandRewrite (Rewrite _ a b) = expandRewrite b ++ expandRewrite a
+    expandRewrite e = [e]
+showExprAsRewrites (FuncExpr h as) = showFuncExpr showExprAsRewrites h as
+showExprAsRewrites e = showExpr e
 
 getHeadStr:: ExprHead -> PosStr
 getHeadStr (ExprHead ps _) = ps
@@ -156,7 +179,7 @@ getExprPos (NumberExpr p _) = p
 getExprPos (FuncExpr h _) = fst $ getHeadStr h
 
 showCodeExpr:: Expr -> PosStr
-showCodeExpr e = (getExprPos e, showExpr e)
+showCodeExpr e = (getExprPos e, showExprOldest e)
 
 extractMaybe:: [Maybe a] -> [a]
 extractMaybe [] = []

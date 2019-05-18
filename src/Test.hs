@@ -12,8 +12,7 @@ tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
 
 simplifyTest:: String -> String -> String
-simplifyTest prg str = "out:" ++ out ++ "\n"
-        -- ++ "out':" ++ out' ++ "\n"
+simplifyTest prg str = ""
         -- ++ "simp:" ++ show simp ++ "\n"
         -- ++ "expr':" ++ show expr' ++ "\n"
         -- ++ "expr'':"  ++ show expr'' ++ "\n"
@@ -24,6 +23,8 @@ simplifyTest prg str = "out:" ++ out ++ "\n"
         ++ "omap:" ++ show omap ++ "\n"
         ++ "tmap:" ++ show tmap ++ "\n"
         ++ "msgs:" ++ msg ++ "\n"
+        ++ "out:" ++ out ++ "\n"
+        ++ "out2:" ++ showExprAsRewrites simp ++ "\n"
         -- ++ "declas:" ++ show declas ++ "\n" 
         -- ++ "props:" ++ show declas ++ "\n"
         -- ++ "rules:" ++ show (makeRules props) ++ "\n" 
@@ -34,9 +35,9 @@ simplifyTest prg str = "out:" ++ out ++ "\n"
     expr'' = fromMaybe (error "wrong expr") expr'
     expr = appSimp simpList expr''
     simp = simplify stepRule expr
-    steps = reverse $ showSteps simp
-    out = intercalate "\n=" (map showExpr steps)
-    out' = intercalate "\n=" (map show steps)
+    steps = showSteps simp
+    out = intercalate "\n=" steps
+    out' = intercalate "\n=" steps
 
 unifyTest:: String -> String
 unifyTest str = out where

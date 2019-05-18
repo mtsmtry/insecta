@@ -12,7 +12,7 @@ import Parse
 import Engine
 
 type TypeMap = M.Map String Expr
-data TypedExpr = TypedExpr Expr TypeMap
+data TypedExpr = TypedExpr Expr TypeMap deriving(Show)
 
 evalType:: TypeMap -> Expr -> Writer [Message] (Maybe Expr)
 evalType tmap NumberExpr{} = return $ Just $ makeIdentExpr "N"
@@ -21,7 +21,7 @@ evalType tmap (IdentExpr ph@(_, h)) = maybe (writer (Nothing, [Message ph "Not d
 evalType tmap (FuncExpr (PureExprHead ph@(p, h)) as) = f $ \case
     FuncExpr (PureExprHead (_, "->")) [arg, ret] ->
         checkArgs as (getArgs arg) >>= \x-> return (if x then Just ret else Nothing)
-    _ -> writer (Nothing, [Message ph "Not function"]) 
+    _ -> writer (Nothing, [Message ph "Not function"])
     where
     getArgs (FuncExpr (PureExprHead (_, "tuple")) xs) = xs
     getArgs x = [x]
@@ -92,7 +92,7 @@ makeScope gm xs = makeScope' gm xs M.empty where
     makeScope' gm [] lm = return lm
     makeScope' gm ((ps@(p, s), e):xs) lm = evalType gm e
         >>= maybe (return lm) (\x-> if isTypeType x 
-                then return $ M.insert s x lm 
+                then return $ M.insert s e lm 
                 else writer (lm, [Message ps ("Not type")]))
         >>= makeScope' gm xs
 
@@ -115,12 +115,12 @@ makeRules tmap (x:xs) = do
         ">>=" -> do
             at' <- evalType scope a
             bt' <- evalType scope b
-            case (at', bt') of 
-                (Just at, Just bt)-> if equals a b
+            case (at', bt') of
+                (Just at, Just bt)-> if equals at bt
                     then return $ Just (True, (a, b)) 
                     else writer (Nothing, [Message pk $ x ++ y]) where
-                        x = "Left side type is'" ++ showExpr at ++ "', "
-                        y = "but right side type is'" ++ showExpr bt ++ "'"
+                        x = "Left side type is '" ++ showExpr at ++ "', "
+                        y = "but right side type is '" ++ showExpr bt ++ "'"
                 _-> return Nothing
         "->" -> do
             et' <- evalType scope e
@@ -149,7 +149,7 @@ makeRuleMap tmap xs = do
     return (toMap a, toMap b, simp)
 
 buildProgram:: String -> ((RuleMap, RuleMap, Simplicity), OpeMap, TypeMap, [Message])
-buildProgram str = (rmap, omap, tmap, msgs ++ msgs' ++ msgs'') where
+buildProgram str = (rmap, omap, tmap, msgs ++ msgs' ++ msgs'' ++ [Message (NonePosition, "") $ show props]) where
     (tmap, msgs') = runWriter $ makeTypeMap declas M.empty
     (rmap, msgs) = runWriter $ makeRuleMap tmap props
     ((declas, omap), rest) = runState parseProgram . tokenize $ str
