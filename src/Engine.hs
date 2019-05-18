@@ -10,27 +10,6 @@ import Control.Arrow
 import Control.Applicative
 import Parse
 
-type Simplicity = [String]
-makeSimp:: Simplicity -> [Rule] -> Writer [Message] Simplicity
-makeSimp m [] = return m
-makeSimp m ((a, b):rs) = do 
-    item <- addSimp m a b
-    makeSimp item rs
-    where
-    addSimp:: Simplicity -> Expr -> Expr -> Writer [Message] Simplicity
-    addSimp m (FuncExpr (PureExprHead (_, a)) _) (FuncExpr (PureExprHead pb@(p, b)) _) = case (elemIndex a m, elemIndex b m) of
-        (Just a', Just b') -> if a' > b' then writer (m, [Message pb "Not as simple as the left side"]) else return m
-        (Just a', Nothing) -> return $ insertAt b a' m
-        (Nothing, Just b') -> return $ insertAt a (b'+1) m
-        (Nothing, Nothing) -> return $ b:a:m
-    addSimp m FuncExpr{} FuncExpr{} = error "Not PureExprHead"
-    addSimp m _ (FuncExpr (PureExprHead pb) _) = writer ([], [Message pb "You can not use constants on the left side"])
-    addSimp m (FuncExpr (PureExprHead pa) _) _ = return m
-    addSimp m a _ = writer ([], [Message (getPosAndStr a) "Constants always have the same simplicity"])
-    insertAt:: a -> Int -> [a] -> [a]
-    insertAt x 0 as = x:as
-    insertAt x i (a:as) = a:insertAt x (i - 1) as
-
 extractRewrite:: Expr -> Expr
 extractRewrite (Rewrite _ a _) = extractRewrite a
 extractRewrite (FuncExpr h as) = FuncExpr h $ map extractRewrite as
@@ -64,6 +43,24 @@ equals (NumberExpr _ n) (NumberExpr _ m) = n == m
 equals (StringExpr (_, a)) (StringExpr (_, b)) = a == b
 equals _ _ = False
 
+-- functions order by simplicity
+type Simplicity = [String]
+
+addSimp:: Simplicity -> Expr -> Expr -> Writer [Message] Simplicity
+addSimp m (FuncExpr (PureExprHead (_, a)) _) (FuncExpr (PureExprHead pb@(p, b)) _) = case (elemIndex a m, elemIndex b m) of
+    (Just a', Just b') -> if a' > b' then writer (m, [Message pb "Not as simple as the left side"]) else return m
+    (Just a', Nothing) -> return $ insertAt b a' m
+    (Nothing, Just b') -> return $ insertAt a (b'+1) m
+    (Nothing, Nothing) -> return $ b:a:m
+    where
+    insertAt:: a -> Int -> [a] -> [a]
+    insertAt x 0 as = x:as
+    insertAt x i (a:as) = a:insertAt x (i - 1) as
+addSimp m FuncExpr{} FuncExpr{} = error "Not PureExprHead"
+addSimp m _ (FuncExpr (PureExprHead pb) _) = writer ([], [Message pb "You can not use constants on the left side"])
+addSimp m (FuncExpr (PureExprHead pa) _) _ = return m
+addSimp m a _ = writer ([], [Message (getPosAndStr a) "Constants always have the same simplicity"]) 
+
 appSimp :: Simplicity -> Expr -> Expr
 appSimp m (FuncExpr h as) = FuncExpr h' $ map (appSimp m) as where
     h' = case h of PureExprHead pt@(_, t) -> ExprHead pt $ fromMaybe 0 $ elemIndex t m; _-> h
@@ -77,7 +74,8 @@ applyArgs f xs = applyArgs' xs [] where
     applyArgs' [] _ = Nothing
     applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
 
-type RuleMap = M.Map String [Rule] 
+type RuleMap = M.Map String [Rule]
+
 simplify:: RuleMap -> Expr -> Expr
 simplify m e = maybe e (simplify m) $ step m e where
     step:: RuleMap -> Expr -> Maybe Expr
@@ -106,6 +104,7 @@ simplify m e = maybe e (simplify m) $ step m e where
     applyByHeadList m (ExprHead (_, f) s:xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
 
 type Derivater = (Expr, Expr) -> Maybe Expr
+
 derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
 derivate m = applyDiff derivateByRuleList where
     applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
@@ -179,6 +178,7 @@ getHeadStr:: ExprHead -> PosStr
 getHeadStr (ExprHead ps _) = ps
 getHeadStr (PureExprHead ps) = ps
 
+getExprPos:: Expr -> Position
 getExprPos (StringExpr (p, _)) = p
 getExprPos (IdentExpr (p, _)) = p
 getExprPos (NumberExpr p _) = p
