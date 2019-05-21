@@ -221,21 +221,45 @@ data VarDecSet = VarDecSet [PosStr] Expr deriving (Show)
 parseVarDecSet:: OpeMap -> State [PosToken] (Maybe VarDecSet)
 parseVarDecSet omap = return (Just VarDecSet) <++> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
+-- [proof] = [command] [expr] [command] [expr]
+
+-- [proof]
+-- [command] assume [expr] {
+--     being [expr]
+--     [multi-proof]
+-- }
+
+-- [proof]
+-- fork [proof]
+-- fork [proof]
+
+data Command = StepCmd | ImplCmd | WrongCmd String deriving (Show)
+data Statement = SingleStm Command Expr
+    | BlockStm [Statement]
+    | AssumeStm Command Expr Expr Statement
+    | ForkStm [Statement] deriving (Show)
+
 parseMultiLineStm:: OpeMap -> State [PosToken] (Maybe Statement)
 parseMultiLineStm omap = return (Just BlockStm) <++> parseSequence (parseStatement omap)
 
-data Statement = StepStm Expr | ImplStm Expr | AssumeStm Expr Statement | BlockStm [Statement] deriving (Show)
 parseStatement:: OpeMap -> State [PosToken] (Maybe Statement)
 parseStatement omap = parseSymbol "{" >>= \case 
     Just{} -> parseBlock
-    Nothing -> parseLineStm
-    where 
+    Nothing -> parseSingleStm
+    where
+    parseCmd = parseIdent >>= \case
+        Just (_, "step") -> return $ Just StepCmd
+        Just (_, "impl") -> return $ Just ImplCmd
+        Just (_, s) -> return $ Just $ WrongCmd s
     parseBlock = return (Just BlockStm) <++> parseSequence (parseStatement omap) <::> parseSymbol "}"
-    parseLineStm = parseIdent >>= \case
-        Just (_, "step") -> return (Just StepStm) <++> parseExpr omap
-        Just (_, "impl") -> return (Just ImplStm) <++> parseExpr omap
-        Just (_, "assume") -> return (Just AssumeStm) <++> parseExpr omap <++> parseStatement omap
-        _ -> return Nothing 
+    parseSingleStm = parseCmd >>= \case
+        Just cmd -> parseIdent >>= \case
+            Just (_, "assume") -> return (Just $ AssumeStm cmd) 
+                <++> parseExpr omap <::> parseSymbol "{"
+                <::> parseToken (Ident "begin") <++> parseExpr omap 
+                <++> parseMultiLineStm omap <::> parseSymbol "}"
+            _ -> return (Just $ SingleStm cmd) <++> parseExpr omap
+        Nothing -> return Nothing
 
 type VarDec = [(PosStr, Expr)]
 parseVarDecs:: OpeMap -> State [PosToken] (Maybe VarDec)
