@@ -16,10 +16,12 @@ extractRewrite (Rewrite _ a _) = extractRewrite a
 extractRewrite (FuncExpr h as) = FuncExpr h $ map extractRewrite as
 extractRewrite x = x
 
-unify:: Expr -> Expr -> Maybe (M.Map String Expr)
+type AssignMap = M.Map String Expr
+
+unify:: Expr -> Expr -> Maybe AssignMap
 unify p t = if b then Just m else Nothing where
     (b, m) = (runState $ unifym p t) M.empty
-    unifym:: Expr -> Expr -> State (M.Map String Expr) Bool
+    unifym:: Expr -> Expr -> State AssignMap Bool
     unifym Rewrite{} _ = error "Do not use Rewrite in a rule"
     unifym e (Rewrite _ a _) = unifym e a -- use newer
     unifym (IdentExpr (_, var)) t = state $ \m-> maybe (True, M.insert var (extractRewrite t) m) (\x-> (x `equals` t, m)) $ M.lookup var m
@@ -107,6 +109,49 @@ simplify m e = maybe e (simplify m) $ step m e where
     applyByHeadList:: RuleMap -> [ExprHead] -> Expr -> Maybe Expr
     applyByHeadList _ [] _ = Nothing
     applyByHeadList m (ExprHead (_, f) s:xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
+
+-- [A, B, X] X => [A, B, X]
+-- [A, B, X] Y => Nothing
+appendStep:: Rule -> Expr -> Expr -> Expr
+appendStep r' t (Rewrite r a b) = Rewrite r a (appendStep t b r')
+appendStep r t u = Rewrite r u t
+
+-- [A, B, C, X, Y, Z] [P, Q, R, X, Y, Z] => [A, B, C, X, R, Q, P]
+-- marge (Z, (Y, (X, (C, (B, A))))) (Z, (Y, (X, (R, (Q, P)))))
+-- => marge (Y, (X, (C, (B, A)))) (Y, (X, (R, (Q, P)))) Z
+-- => marge (X, (C, (B, A))) (X, (R, (Q, P))) Y
+-- => marge (C, (B, A)) (R, (Q, P)) X
+-- => (P, (Q, (R, (X, (C, (B, A))))))
+
+margeRewrite:: Maybe (Rule, Expr, Rule) -> Expr -> Expr -> Maybe Expr
+-- A a B b C c X x Y y Z + P p Q q R r X x Y y Z => A a B b C c X r R q Q p P
+-- marge (A a B b C c X x Y y Z) (P p Q q R r X x' Y y' Z) Nothing
+-- => marge (A a B b C c X x Y) (P p Q q R r X x Y) (y, Z, y')
+-- => marge (A a B b C c X) (P p Q q R r X) (x, Y, x')
+-- => marge (A a B b C) (P p Q q R) (c, X, r)
+-- => appendStep (A a B b C c X) (P p Q q R) r
+margeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = if equals a a'
+    then margeRewrite (Just (r, a, r')) b b'
+    else case junction of
+        Just (jr, je, jr') -> Just $ appendStep (Rewrite jr je former) latter jr'
+        Nothing -> Nothing
+-- marge a [s, t, a] => [a, t, s]
+margeRewrite _ former latter@(Rewrite r a b) = if equals former a
+    then Just $ appendStep r (margeRewrite Nothing former a) b
+    else Nothing
+-- marge [s, t, a] a => [s, t, a]
+margeRewrite _ former@(Rewrite r a b) latter = if equals a latter
+    then Just $ Rewrite r (margeRewrite Nothing a latter) b
+    else Nothing
+-- marge [A, B, f([a, b], u)] [P, Q, f([s, t, b], u)] 
+-- => [A, B, marge f([a, b], u) f([s, t, b], u), Q, P]
+-- => [A, B, f(marge [a, b] [s, t, b], marge u u), Q, P]
+-- => [A, B, f([a, b, t, s],  u), Q, P]
+margeRewrite _ (FuncExpr f as) (FuncExpr g bs) = if showHead f == showHead g
+    then FuncExpr f <$> conjMaybe (zipWith (margeRewrite Nothing) as bs)
+    else Nothing
+-- marge x x => x 
+margeRewrite _ a b = if equals a b then a else Nothing
 
 type Derivater = (Expr, Expr) -> Maybe Expr
 

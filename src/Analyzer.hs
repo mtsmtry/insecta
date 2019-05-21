@@ -82,14 +82,14 @@ makeScope gm xs = makeScope' gm xs M.empty where
         >>= makeScope' gm xs
 
 -- (scope, expression) -> (is step rule, rule)
-makeRule:: TypeMap -> Expr -> Writer [Message] (Maybe (Bool, Rule))
-makeRule tmap e@(FuncExpr (PureExprHead pk@(p, kind)) [a, b]) = case kind of
+makeRule:: TypeMap -> Expr -> Writer [Message] (Maybe (Bool, String, Rule))
+makeRule tmap e@(FuncExpr (PureExprHead pk@(p, kind)) [a@(FuncExpr h _), b]) = case kind of
     ">>=" -> do
         at' <- evalType tmap a
         bt' <- evalType tmap b
         case (at', bt') of
             (Just at, Just bt)-> if equals at bt
-                then return $ Just (True, (a, b)) 
+                then return $ Just (True, showHead h, (a, b)) 
                 else writer (Nothing, [Message pk $ x ++ y]) where
                     x = "Left side type is '" ++ showExpr at ++ "', "
                     y = "but right side type is '" ++ showExpr bt ++ "'"
@@ -98,36 +98,40 @@ makeRule tmap e@(FuncExpr (PureExprHead pk@(p, kind)) [a, b]) = case kind of
         et' <- evalType tmap e
         case et' of
             Just et-> if isIdentOf "Prop" et 
-                then return $ Just (False, (a, b))
+                then return $ Just (False, showHead h, (a, b))
                 else writer (Nothing, [Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ showExpr et ++ "'"])
             Nothing-> return Nothing
     f -> writer (Nothing, [Message pk "Wrong function"])
+makeRule _ e@(FuncExpr (PureExprHead _) _) = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
 makeRule _ e = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
 
 insertRule:: TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] (RuleMap, RuleMap)
 insertRule tmap prop rset@(smap, imap) = do
     mrule <- makeRule tmap prop
-    return $ (\x-> (tmap, x)) $ case mrule of 
-        Just (True, rule) -> (M.insert rule smap, imap)
-        Just (False, rule) -> (smap, M.insert rule imap)
+    return $ case mrule of
+        Just (True, name, rule) -> (M.adjust (rule:) name smap, imap)
+        Just (False, name, rule) -> (smap, M.adjust (rule:) name imap)
         Nothing -> rset
 
-runStatement:: (RuleMap, RuleMap) -> Statement -> Expr -> Writer [Message] Statement
-runStatement (rmap, _) stm@(StepStm goal) trg = let (strg, sgoal) = (simplify trg, simplify goal) in
-    if equals strg sgoal 
-    then return (StepStm strg) 
-    else writer (stm, [Message (getExprPos goal) $ "Couldn't match simplified terms with '" ++ 
-        showExprLatest strg ++ "' and '" showExprLatest sgoal ++ "'"])
-runStatement (_, rmap) stm@(ImplStm goal) trg = maybe 
-    (writer (stm, [Message (getExprPos goal) $ "Couldn't derivate from '" ++ showExprLatest trg ++ "'"]))
-    (return (ImplStm stm))
-    (derivate rmap (trg, goal))
-runStatement rset stm@(AssumeStm ass inn) trg = return $ runStatement rset inn 
+runStatement:: (RuleMap, RuleMap) -> Statement -> Expr -> Writer [Message] Expr
+runStatement (smap, imap) stm@(SingleStm cmd goal) input = case cmd of
+    StepCmd -> case margeRewrite strg sgoal of
+        Just proof -> return strg
+        Nothing -> writer (sgoal, [Message (showCodeExpr goal) $ "Couldn't match simplified terms with '" ++ 
+            showExprLatest strg ++ "' and '" ++ showExprLatest sgoal ++ "'"])
+        where 
+            (strg, sgoal) = (simplify smap input, simplify smap goal)
+    ImplCmd -> case derivate imap (input, goal) of
+        Just proof -> return proof
+        Nothing -> (writer (goal, [Message (showCodeExpr goal) $ "Couldn't derivate from '" ++ showExprLatest input ++ "'"]))
+runStatement rset stm@(AssumeStm cmd ass first main) trg = 
+    return ass
 runStatement rset stm@(BlockStm stms) trg = runStms stms trg <$> BlockStm where 
-    runStms:: [Statement] -> Expr -> [Statement]
+    runStms:: [Statement] -> Expr -> Writer [Message] [Statement]
     runStms (x:xs) trg = do
-        trg' <- runStatement rset x
-        return trg':runStms xs trg'
+        (stm, ntrg) <- runStatement rset x trg
+        rest <- runStms xs ntrg
+        return $ stm:rest
 
 data Context = Context TypeMap Simplicity (RuleMap, RuleMap)
 
