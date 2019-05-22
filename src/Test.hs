@@ -14,9 +14,10 @@ tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
 
 showMessages msgs = intercalate "\n" $ map show msgs
-parseExprs str = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
+parseExprs str omap = maybe [] snd (evalState (parseCommaSeparated $ parseExpr omap) $ tokenize str)
 
 showContext (Context omap tmap smap (rsmap, rimap)) = toJsonFormatedWith (showExpr omap) tmap ++ "\n"
+    ++ show omap ++ "\n"
     ++ toJsonFormatedWith (showr " >>= ") rsmap ++ "\n"
     ++ toJsonFormatedWith (showr " -> ") rimap ++ "\n"
     ++ show smap
@@ -27,7 +28,7 @@ showContext (Context omap tmap smap (rsmap, rimap)) = toJsonFormatedWith (showEx
 reasoningTest:: String -> String -> String
 reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ out where
     (ctx@(Context omap tmap smap (rsmap, rimap)), msg) = runWriter $ buildProgram prg
-    exprs = parseExprs str
+    exprs = parseExprs str omap
     out = case exprs of
         [a, b] -> intercalate "\n" steps where
             expr = derivate rimap tmap (a, b)
@@ -39,7 +40,7 @@ reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ o
 
 unifyTest:: String -> String
 unifyTest str = out where
-    exprs = parseExprs str
+    exprs = parseExprs str M.empty
     [a, b] = exprs
     out = show $ unify M.empty a b
 

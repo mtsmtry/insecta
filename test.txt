@@ -1,21 +1,21 @@
 
-infixl ^ 10
-infixl * 9
-infixl / 9
-infixl % 9
-infixl + 8
-infixl - 8
-infixl = 7
-infixl < 7
-infixl > 7
-infixl <= 7
-infixl >= 7
-uinfixr ~ 6
-infixl & 5
-infixl | 4
-infixl = 3
-infixl -> 2
-infixl <-> 1
+infixl 10 ^
+infixl 9 *
+infixl 9 /
+infixl 8 %
+infixl 8 +
+infixl 8 -
+infixl 7 =
+infixl 7 <
+infixl 7 >
+infixl 7 <=
+infixl 7 >=
+unaryr 6 ~
+infixl 5 &
+infixl 4 |
+infixl 3 =
+infixl 2 ->
+infixl 1 <->
 
 data N = O | S(N)
 undef R: Type
