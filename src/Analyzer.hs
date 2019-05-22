@@ -13,10 +13,12 @@ import Parser
 import Rewriter
 
 type TypeMap = M.Map String Expr
+data Context = Context TypeMap Simplicity (RuleMap, RuleMap)
 
 typeType = makeIdentExpr "Type"
-buildInTypes = ["Prop", "Char"]
-buildInScope = M.fromList $ map (\x-> (x, typeType)) buildInTypes
+newContext = Context buildInScope [] (M.empty, M.empty) where
+    buildInTypes = ["Prop", "Char"]
+    buildInScope = M.fromList $ map (\x-> (x, typeType)) buildInTypes
 
 isIdentOf:: String -> Expr -> Bool
 isIdentOf t (IdentExpr (_, s)) = t == s
@@ -77,7 +79,7 @@ makeScope gm xs = makeScope' gm xs M.empty where
     makeScope' gm ((ps@(p, s), e):xs) lm = evalType gm e
         >>= maybe (return lm) (\x-> if isTypeType x 
                 then return $ M.insert s e lm 
-                else writer (lm, [Message ps ("Not type")]))
+                else writer (lm, [Message ps "Not type"]))
         >>= makeScope' gm xs
 
 -- (scope, expression) -> (is step rule, rule)
@@ -108,8 +110,8 @@ insertRule:: TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] (RuleMap,
 insertRule tmap prop rset@(smap, imap) = do
     mrule <- makeRule tmap prop
     return $ case mrule of
-        Just (True, name, rule) -> (M.adjust (rule:) name smap, imap)
-        Just (False, name, rule) -> (smap, M.adjust (rule:) name imap)
+        Just (True, name, rule) -> (M.insertWith (++) name [rule] smap, imap)
+        Just (False, name, rule) -> (smap, M.insertWith (++) name [rule] imap)
         Nothing -> rset
 
 runCommand:: Simplicity -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
@@ -138,34 +140,35 @@ runStatement simp rmap input = \case
             ntrg <- runStatement simp rmap input x
             runStms xs ntrg
 
-data Context = Context TypeMap Simplicity (RuleMap, RuleMap)
-
 -- reflect a declaration in the global scope and analyze type and proof
 loadDecla:: Decla -> Context -> Writer [Message] Context
 loadDecla (Theorem dec prop stm) (Context tmap simp rset) = do
     lm <- makeScope tmap dec
     let scope = M.union lm tmap
     res <- runStatement simp rset prop stm
-    rset' <- insertRule tmap prop rset
-    return $ Context tmap simp rset
-    -- tmap' <- addDeclaToGlobal dec tmap
+    rset' <- insertRule scope prop rset
+    return $ Context tmap simp rset'
 
 loadDecla (Axiom dec prop) (Context tmap simp rset) = do
-    rset' <- insertRule tmap prop rset
-    return (tmap, rset')
+    lm <- makeScope tmap dec
+    let scope = M.union lm tmap
+    rset' <- insertRule scope prop rset
+    return $ Context tmap simp rset'
 
 loadDecla (Undef (_, t) e) (Context tmap simp rset) = do
     tmap' <- addIdent t e tmap
-    return Context tmap' simp rset
+    return $ Context tmap' simp rset
 
 loadDecla (Define (_, t) args ret def) (Context tmap simp rset) = do
-    tmap' <- addIdent t (makeFuncType (toTypes args) ret)
-    return Context tmap' simp rset
+    lm <- makeScope tmap args
+    let scope = M.union lm tmap
+    tmap' <- addIdent t (makeFuncType (map snd args) ret) tmap
+    return $ Context tmap' simp rset
 
 loadDecla (DataType (p, t) def) (Context tmap simp rset) = do
     tmap' <- addIdent t (makeIdentExpr "Type") tmap
     addCstr cstrs tmap'
-    return Context tmap' simp rset
+    return $ Context tmap' simp rset
     where
     thisType = makeIdentExpr t
     cstrs = extractArgs "|" def
@@ -181,3 +184,17 @@ loadDecla (DataType (p, t) def) (Context tmap simp rset) = do
             m' <- addIdent i cstrType m
             addCstr xs m'
     addCstr e m = error $ show e
+
+loadDecla _ ctx = return ctx
+
+buildProgram::String -> Writer [Message] (OpeMap, Context)
+buildProgram prg = do 
+    ctx <- loadDeclas declas newContext
+    return (omap, ctx)
+    where
+    tokens = tokenize prg
+    ((declas, omap), rest) = runState parseProgram tokens
+    loadDeclas [] ctx = return ctx
+    loadDeclas (x:xs) ctx = do
+        ctx' <- loadDecla x ctx
+        loadDeclas xs ctx'

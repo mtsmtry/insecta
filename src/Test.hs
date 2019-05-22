@@ -3,43 +3,33 @@ import Data.Char
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
+import Control.Monad.Writer
 import Control.Monad.State
 import Parser
+import Library
 import Rewriter
 import Analyzer
 
 tokenizeTest line = intercalate "," $ map show $ tokenize line
 parserTest x = show . runState x . tokenize
 
-simplifyTest:: String -> String -> String
-simplifyTest prg str = ""
-        -- ++ "simp:" ++ show simp ++ "\n"
-        -- ++ "expr':" ++ show expr' ++ "\n"
-        -- ++ "expr'':"  ++ show expr'' ++ "\n"
-        -- ++ "expr:" ++ show expr ++ "\n" 
-        ++ "simpList:" ++ show simpList ++ "\n"
-        ++ "stepRule:" ++ show stepRule ++ "\n"
-        ++ "implRule:" ++ show implRule ++ "\n"
-        ++ "omap:" ++ show omap ++ "\n"
-        ++ "tmap:" ++ show tmap ++ "\n"
-        ++ "msgs:" ++ msg ++ "\n"
-        ++ "out:" ++ out ++ "\n"
-        ++ "out2:" ++ showExprAsRewrites simp ++ "\n"
-        -- ++ "declas:" ++ show declas ++ "\n" 
-        -- ++ "props:" ++ show declas ++ "\n"
-        -- ++ "rules:" ++ show (makeRules props) ++ "\n" 
-        where
-    ((stepRule, implRule, simpList), omap, tmap, msgs) = buildProgram prg
-    msg = intercalate "\n" $ fmap show msgs
-    expr' = (evalState $ parseExpr omap) (tokenize str)
-    expr'' = fromMaybe (error "wrong expr") expr'
-    expr = appSimp simpList expr''
-    simp = simplify stepRule expr
-    steps = showSteps simp
-    out = intercalate "\n=" steps
-    out' = intercalate "\n=" steps
-
+showMessages msgs = intercalate "\n" $ map show msgs
 parseExprs str = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
+
+showRule s (a, b) = showExpr a ++ s ++ showExpr b
+showContext (Context tmap smap (rsmap, rimap)) = toJsonWith showExpr tmap ++ "\n"
+    ++ toJsonWith (intercalate "," . map (showRule " >>= ")) rsmap ++ "\n"
+    ++ toJsonWith (intercalate "," . map (showRule " -> ")) rimap 
+
+simplifyTest:: String -> String -> String
+simplifyTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ctx where
+    ((omap, ctx@(Context tmap smap (rsmap, rimap))), msg) = runWriter $ buildProgram prg
+    (minput, rest) = (runState $ parseExpr omap) (tokenize str)
+    out = case minput of
+        Just input -> intercalate "" steps where
+            expr = simplify smap rsmap input
+            steps = showSteps expr
+        Nothing -> "parse error"
 
 unifyTest:: String -> String
 unifyTest str = out where
@@ -48,18 +38,19 @@ unifyTest str = out where
     out = show $ unify a b
 
 derivateTest:: String -> String -> String
-derivateTest prg str = out' where
-    ((stepRule, implRule, simpList), omap, tmap, msgs) = buildProgram prg
+derivateTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ctx where
+    ((omap, ctx@(Context tmap smap (rsmap, rimap))), msg) = runWriter $ buildProgram prg
     exprs = parseExprs str
     [a, b] = exprs
-    out = show $ derivate implRule (a, b)
-    out' = out ++ "implRule:" ++ show implRule ++ "\n" ++ "stepRule:" ++ show stepRule ++ "\n" ++ "msgs:" ++ show msgs ++ "\n"
+    out = show expr where -- intercalate "" steps
+        expr = derivate rimap (a, b)
+        steps = maybe [] showSteps expr
 
 test x = forever $ getLine >>= (putStrLn . x)
 testFunc2 = test $ parserTest $ parseDecla M.empty
 testFunc = do
     file <- readFile "test.txt"
     test $ derivateTest file
-testFunc4 = do
+testFunc3 = do
     file <- readFile "test.txt"
     test $ simplifyTest file

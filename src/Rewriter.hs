@@ -193,7 +193,7 @@ showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
     show (r, e) = showOldestExpr e ++ " " ++ maybe "" showReason r
 
     showSteps':: [(Maybe Reason, Expr)] -> Expr -> [(Maybe Reason, Expr)]
-    showSteps' p e = maybe p (\x@(_, t)-> showSteps' (x:p) ) $ nextStep e
+    showSteps' p e = maybe p (\x@(_, t)-> showSteps' (x:p) t) $ nextStep e
 
     showReason:: Reason -> String
     showReason (StepReason (a, b) asg) = showExpr a ++ " >>= " ++ showExpr b ++ " " ++ toJson asg
@@ -202,19 +202,19 @@ showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
 
     nextStep:: Expr -> Maybe (Maybe Reason, Expr)
     nextStep (Rewrite r a b) = Just $ maybe (Just r, a) (\(r', e)-> (r', Rewrite r a e)) $ nextStep b
-    nextStep (FuncExpr h as) = (applyArgs nextStep as >>= Just . FuncExpr h) >>= \x-> Just (Nothing, x)
+    nextStep (FuncExpr h as) = applyArgs nextStep as >>= (\(r, as')-> Just (r, FuncExpr h as'))
     nextStep _ = Nothing
 
-    applyArgs:: (Expr -> Maybe Expr) -> [Expr] -> Maybe [Expr]
+    applyArgs:: (Expr -> Maybe (Maybe Reason, Expr)) -> [Expr] -> Maybe (Maybe Reason, [Expr])
     applyArgs f xs = applyArgs' xs [] where
-
-    applyArgs':: [Expr] -> [Expr] -> Maybe (Reason, [Expr])
-    applyArgs' [] _ = Nothing
-    applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
+        applyArgs':: [Expr] -> [Expr] -> Maybe (Maybe Reason, [Expr])
+        applyArgs' [] _ = Nothing
+        applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\(r, e)-> Just (r, reverse (x:as') ++ as)) (f a)
 
 showFuncExpr:: (Expr -> String) -> PosStr -> [Expr]-> String
+showFuncExpr fshow (_, "tuple") as = "(" ++ intercalate ", " (map fshow as) ++ ")"
 showFuncExpr fshow (_, f) as = if isAlpha (head f) || length as /= 2 
-    then f ++ "(" ++ intercalate "," (map fshow as) ++ ")"
+    then f ++ "(" ++ intercalate ", " (map fshow as) ++ ")"
     else let [a, b] = as in fshow a ++ f ++ fshow b 
 
 showExpr:: Expr -> String
@@ -225,7 +225,7 @@ showExpr (NumberExpr _ n) = show n
 showExpr (FuncExpr f as) = showFuncExpr showExpr f as
 
 showExprAsRewrites:: Expr -> String
-showExprAsRewrites e@Rewrite{} = "[" ++ intercalate "," steps ++ "]" where
+showExprAsRewrites e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
     steps = map showExprAsRewrites $ expandRewrite e
     expandRewrite:: Expr -> [Expr]
     expandRewrite (Rewrite e a b) = expandRewrite b ++ expandRewrite a
