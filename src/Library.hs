@@ -12,3 +12,6 @@ import Control.Applicative
 conjMaybe:: [Maybe a] -> Maybe [a]
 conjMaybe [] = Just []
 conjMaybe (x:xs) = (:) <$> x <*> conjMaybe xs
+
+toJson:: Show k => Show v => M.Map k v -> String
+toJson m = "{" ++ concatMap (\(k, v)-> show k ++ ": " ++ show v) (M.toList m) ++ "}"

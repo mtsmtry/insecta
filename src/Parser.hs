@@ -41,6 +41,8 @@ data PosToken = PosToken Position Token deriving (Show)
 
 type PosStr = (Position, String)
 
+sameStr (_, a) (_, b) = a == b
+
 makePosStr:: String -> PosStr
 makePosStr s = (NonePosition, s)
 
@@ -92,19 +94,14 @@ type Rule = (Expr, Expr)
 -- M.Map(operator string, (preceed, is left associative))
 -- preceeder as high value (ex = 1, + 2)
 type OpeMap = M.Map String (Int, Bool)
-data ExprHead = ExprHead PosStr Int | PureExprHead PosStr deriving (Show)
 
-showHead:: ExprHead -> String
-showHead (ExprHead (_, t) _) = t
-showHead (PureExprHead (_, t)) = t
+type AssignMap = M.Map String Expr
+data Reason = StepReason Rule AssignMap | ImplReason Rule AssignMap | EqualReason deriving (Show)
 
 -- Expression
 -- has position on code
-data Expr = IdentExpr PosStr | FuncExpr ExprHead [Expr] 
-        | StringExpr PosStr | NumberExpr Position Int | Rewrite Rule Expr Expr deriving (Show)
-
-makeExprHead:: String -> ExprHead
-makeExprHead = PureExprHead . makePosStr
+data Expr = IdentExpr PosStr | FuncExpr PosStr [Expr] 
+        | StringExpr PosStr | NumberExpr Position Int | Rewrite Reason Expr Expr deriving (Show)
 
 makeIdentExpr:: String -> Expr
 makeIdentExpr = IdentExpr . makePosStr
@@ -114,8 +111,7 @@ getPosAndStr (IdentExpr ps) = ps
 getPosAndStr (StringExpr ps) = ps
 getPosAndStr (NumberExpr p n) = (p, show n)
 getPosAndStr (Rewrite _ a _) = getPosAndStr a
-getPosAndStr (FuncExpr (ExprHead ps _) _) = ps
-getPosAndStr (FuncExpr (PureExprHead ps) _) = ps
+getPosAndStr (FuncExpr ps _) = ps
 
 -- parse expression by shunting yard algorithm        
 parseExpr:: OpeMap -> State [PosToken] (Maybe Expr)
@@ -148,7 +144,7 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
     makeExpr:: [(PosToken, Int)] -> [Expr] -> [Expr]
     makeExpr [] q = q
     makeExpr ((PosToken _ (Ident "tuple"), 1):os) q = makeExpr os q
-    makeExpr ((PosToken p t, n):os) q = makeExpr os $ FuncExpr (PureExprHead (p, showToken t)) args:rest
+    makeExpr ((PosToken p t, n):os) q = makeExpr os $ FuncExpr (p, showToken t) args:rest
         where (args, rest) = (reverse $ take n q, drop n q)
     -- apply 'f' to a element that satisfy 'cond' for the first time
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
