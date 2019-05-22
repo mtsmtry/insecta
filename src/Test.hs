@@ -16,10 +16,12 @@ parserTest x = show . runState x . tokenize
 showMessages msgs = intercalate "\n" $ map show msgs
 parseExprs str = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
 
-showRule s (a, b) = showExpr a ++ s ++ showExpr b
-showContext (Context tmap smap (rsmap, rimap)) = toJsonWith showExpr tmap ++ "\n"
-    ++ toJsonWith (intercalate "," . map (showRule " >>= ")) rsmap ++ "\n"
-    ++ toJsonWith (intercalate "," . map (showRule " -> ")) rimap 
+showContext (Context tmap smap (rsmap, rimap)) = toJsonFormatedWith showExpr tmap ++ "\n"
+    ++ toJsonFormatedWith (show " >>= ") rsmap ++ "\n"
+    ++ toJsonFormatedWith (show " -> ") rimap 
+    where
+    show s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
+    showRule s (a, b) = showExpr a ++ s ++ showExpr b
 
 simplifyTest:: String -> String -> String
 simplifyTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ctx where
@@ -42,15 +44,15 @@ derivateTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ct
     ((omap, ctx@(Context tmap smap (rsmap, rimap))), msg) = runWriter $ buildProgram prg
     exprs = parseExprs str
     [a, b] = exprs
-    out = show expr where -- intercalate "" steps
+    out = intercalate "\n" steps where
         expr = derivate rimap (a, b)
         steps = maybe [] showSteps expr
 
 test x = forever $ getLine >>= (putStrLn . x)
 testFunc2 = test $ parserTest $ parseDecla M.empty
-testFunc = do
+testFunc' = do
     file <- readFile "test.txt"
     test $ derivateTest file
-testFunc3 = do
+testFunc = do
     file <- readFile "test.txt"
     test $ simplifyTest file

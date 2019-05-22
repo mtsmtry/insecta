@@ -190,18 +190,18 @@ showOldestExpr = showExpr . getOldestExpr
 showSteps:: Expr -> [String]
 showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
     show::(Maybe Reason, Expr) -> String
-    show (r, e) = showOldestExpr e ++ " " ++ maybe "" showReason r
+    show (r, e) = showOldestExpr e ++ " " ++ maybe "" (\x-> "[" ++ showReason x ++ "]") r
 
     showSteps':: [(Maybe Reason, Expr)] -> Expr -> [(Maybe Reason, Expr)]
     showSteps' p e = maybe p (\x@(_, t)-> showSteps' (x:p) t) $ nextStep e
 
     showReason:: Reason -> String
-    showReason (StepReason (a, b) asg) = showExpr a ++ " >>= " ++ showExpr b ++ " " ++ toJson asg
-    showReason (ImplReason (a, b) asg) = showExpr a ++ " -> " ++ showExpr b ++ " " ++ toJson asg
+    showReason (StepReason (a, b) asg) = showExpr a ++ " >>= " ++ showExpr b ++ " " ++ toJsonWith showExpr asg
+    showReason (ImplReason (a, b) asg) = showExpr a ++ " -> " ++ showExpr b ++ " " ++ toJsonWith showExpr asg
     showReason EqualReason = ""
 
     nextStep:: Expr -> Maybe (Maybe Reason, Expr)
-    nextStep (Rewrite r a b) = Just $ maybe (Just r, a) (\(r', e)-> (r', Rewrite r a e)) $ nextStep b
+    nextStep (Rewrite r a b) = Just $ fromMaybe (Just r, a) $ nextStep b
     nextStep (FuncExpr h as) = applyArgs nextStep as >>= (\(r, as')-> Just (r, FuncExpr h as'))
     nextStep _ = Nothing
 

@@ -13,8 +13,10 @@ conjMaybe:: [Maybe a] -> Maybe [a]
 conjMaybe [] = Just []
 conjMaybe (x:xs) = (:) <$> x <*> conjMaybe xs
 
-toJson:: Show k => Show v => M.Map k v -> String
-toJson m = "{" ++ concatMap (\(k, v)-> show k ++ ": " ++ show v) (M.toList m) ++ "}"
+toJson m = toJsonWith show
 
 toJsonWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
-toJsonWith f m = "{\t\n" ++ concatMap (\(k, v)-> "\t" ++ show k ++ ": " ++ f v ++ "\n") (M.toList m) ++ "}"
+toJsonWith f m = "{" ++ intercalate ", " (map (\(k, v)-> show k ++ ": " ++ f v) (M.toList m)) ++ "}"
+
+toJsonFormatedWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
+toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ show k ++ ": " ++ f v) (M.toList m)) ++ "\n}"

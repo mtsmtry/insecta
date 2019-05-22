@@ -1,19 +1,33 @@
 
-
-
-infixl + 10 => add
-infixl - 10 => sub
-infixl * 11 => mul
-infixl / 11 => div
-infixr ^ 12 => pow
-infixl && 5 => and
+infixl ^ 10
+infixl * 9
+infixl / 9
+infixl % 9
+infixl + 8
+infixl - 8
+infixl = 7
+infixl < 7
+infixl > 7
+infixl <= 7
+infixl >= 7
+uinfixr ~ 6
+infixl & 5
+infixl | 5
+infixl = 4
+infixl -> 3
+infixl <-> 3
 
 data N = O | S(N)
+undef R: Type
 
 undef operator +: (N, N)->N
 undef operator *: (N, N)->N
 undef operator ->: (Prop, Prop)->Prop
-undef operator &&: (Prop, Prop)->Prop
+undef operator &: (Prop, Prop)->Prop
+undef operator |: (Prop, Prop)->Prop
+undef operator ~: Prop->Prop
+undef inv: R->R
+undef mns: R->R
 
 axiom (a: N) {
     a + 0 >>= a
@@ -28,5 +42,59 @@ axiom (a: N) {
 }
 
 axiom (A: Prop, B: Prop) {
-    A && B -> A
+    A & B -> A
+}
+
+undef True: Prop
+undef False: Prop
+
+axiom () {
+	(~False) >>= True
+}
+
+axiom () {
+	~True >>= False
+}
+
+axiom (A: Prop) {
+    ~(~A) >>= A
+}
+
+#axiom (A, B: Prop) {
+#	A & B = B & A
+#}
+
+#axiom (A, B, C: Prop) {
+#	A & (B & C) = (A & B) & C
+#}
+
+#axiom (A, B: Prop) {
+#	A | B = B | A
+#}
+
+#axiom (A, B, C: Prop) {
+#	A | (B | C) = (A | B) | C
+#}
+
+axiom (A: Prop) {
+	A & True >>= A
+}
+
+axiom (A: Prop) {
+	A | True >>= True
+}
+
+theorim (A, B, P, Q: Prop) {
+	((A -> P) & (B -> Q)) -> ((A & B) -> (P & Q))
+proof:
+	step (A -> P) & (B -> Q)
+	step (~A | P) & (~B | Q)
+	step ~A & ~B | ~A & Q | P & ~B | P & Q
+	impl ~A & ~B | ~A | P & ~B | P & Q
+	impl ~A & ~B | ~A | ~B | P & Q
+	step ~(A | B) | ~(A & B) | (P & Q)
+	step ((A | B) & (A & B)) -> P & Q
+	step (A & B & A | B & A & B) -> P & Q
+	step (A & B | A & B) -> P & Q
+	step (A & B) -> (P & Q)
 }
