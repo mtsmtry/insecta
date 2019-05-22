@@ -12,7 +12,6 @@ import Library
 import Parser
 import Rewriter
 
-type TypeMap = M.Map String Expr
 data Context = Context TypeMap Simplicity (RuleMap, RuleMap)
 
 typeType = makeIdentExpr "Type"
@@ -83,14 +82,16 @@ makeScope gm xs = makeScope' gm xs M.empty where
         >>= makeScope' gm xs
 
 -- (scope, expression) -> (is step rule, rule)
-makeRule:: TypeMap -> Expr -> Writer [Message] (Maybe (Bool, String, Rule))
-makeRule tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = case kind of
+makeRule:: Simplicity -> TypeMap -> Expr -> Writer [Message] (Maybe (Bool, String, Rule, Simplicity))
+makeRule smap tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = case kind of
     ">>=" -> do
         at' <- evalType tmap a
         bt' <- evalType tmap b
         case (at', bt') of
             (Just at, Just bt)-> if equals at bt
-                then return $ Just (True, h, (a, b)) 
+                then do 
+                    smap' <- addSimp smap a b
+                    return $ Just (True, h, (a, b), smap') 
                 else writer (Nothing, [Message pk $ x ++ y]) where
                     x = "Left side type is '" ++ showExpr at ++ "', "
                     y = "but right side type is '" ++ showExpr bt ++ "'"
@@ -99,45 +100,45 @@ makeRule tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = case kind o
         et' <- evalType tmap e
         case et' of
             Just et-> if isIdentOf "Prop" et 
-                then return $ Just (False, h, (a, b))
+                then return $ Just (False, h, (a, b), smap)
                 else writer (Nothing, [Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ showExpr et ++ "'"])
             Nothing-> return Nothing
     f -> writer (Nothing, [Message pk "Wrong function"])
-makeRule _ e@(FuncExpr _ _) = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
-makeRule _ e = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
+makeRule _ _ e@(FuncExpr _ _) = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
+makeRule _ _ e = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
 
-insertRule:: TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] (RuleMap, RuleMap)
-insertRule tmap prop rset@(smap, imap) = do
-    mrule <- makeRule tmap prop
+insertRule:: Simplicity -> TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] ((RuleMap, RuleMap), Simplicity)
+insertRule simp tmap prop rset@(smap, imap) = do
+    mrule <- makeRule simp tmap prop
     return $ case mrule of
-        Just (True, name, rule) -> (M.insertWith (++) name [rule] smap, imap)
-        Just (False, name, rule) -> (smap, M.insertWith (++) name [rule] imap)
-        Nothing -> rset
+        Just (True, name, rule, simp') -> ((M.insertWith (++) name [rule] smap, imap), simp')
+        Just (False, name, rule, simp') -> ((smap, M.insertWith (++) name [rule] imap), simp')
+        Nothing -> (rset, simp)
 
-runCommand:: Simplicity -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
-runCommand simp (smap, _) StepCmd goal input = case mergeRewrite strg sgoal of
+runCommand:: Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
+runCommand simp tmap (smap, _) StepCmd goal input = case mergeRewrite strg sgoal of
     Just proof -> return strg
     Nothing -> writer (sgoal, [Message (showCodeExpr goal) $ "Couldn't match simplified terms with '" ++ 
         showLatestExpr strg ++ "' and '" ++ showLatestExpr sgoal ++ "'"])
     where 
-        (strg, sgoal) = (simplify simp smap input, simplify simp smap goal)
-runCommand s (_, imap) ImplCmd goal input = case derivate imap (input, goal) of
+        (strg, sgoal) = (simplify simp tmap smap input, simplify simp tmap smap goal)
+runCommand s tmap (_, imap) ImplCmd goal input = case derivate imap tmap (input, goal) of
     Just proof -> return proof
     Nothing -> (writer (goal, [Message (showCodeExpr goal) $ "Couldn't derivate from '" ++ showLatestExpr input ++ "'"]))
 
-runStatement:: Simplicity -> (RuleMap, RuleMap) -> Expr -> Statement -> Writer [Message] Expr
-runStatement simp rmap input = \case
-    SingleStm cmd goal -> runCommand simp rmap cmd goal input
+runStatement:: Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Expr -> Statement -> Writer [Message] Expr
+runStatement simp tmap rmap input = \case
+    SingleStm cmd goal -> runCommand simp tmap rmap cmd goal input
     AssumeStm cmd ass first main -> do
         -- P => X -> [A, B, C]
         -- [P, Q, X -> [A, B, C]]
-        begin <- runCommand simp rmap cmd input (FuncExpr (NonePosition, "->") [ass, first])
-        block <- runStatement simp rmap first main
+        begin <- runCommand simp tmap rmap cmd input (FuncExpr (NonePosition, "->") [ass, first])
+        block <- runStatement simp tmap rmap first main
         return $ Rewrite EqualReason begin (FuncExpr (NonePosition, "->") [ass, block])
     BlockStm stms -> runStms stms input where 
         runStms:: [Statement] -> Expr -> Writer [Message] Expr
         runStms (x:xs) input = do
-            ntrg <- runStatement simp rmap input x
+            ntrg <- runStatement simp tmap rmap input x
             runStms xs ntrg
 
 -- reflect a declaration in the global scope and analyze type and proof
@@ -145,15 +146,15 @@ loadDecla:: Decla -> Context -> Writer [Message] Context
 loadDecla (Theorem dec prop stm) (Context tmap simp rset) = do
     lm <- makeScope tmap dec
     let scope = M.union lm tmap
-    res <- runStatement simp rset prop stm
-    rset' <- insertRule scope prop rset
-    return $ Context tmap simp rset'
+    res <- runStatement simp tmap rset prop stm
+    (rset', simp') <- insertRule simp scope prop rset
+    return $ Context tmap simp' rset'
 
 loadDecla (Axiom dec prop) (Context tmap simp rset) = do
     lm <- makeScope tmap dec
     let scope = M.union lm tmap
-    rset' <- insertRule scope prop rset
-    return $ Context tmap simp rset'
+    (rset', simp')  <- insertRule simp scope prop rset
+    return $ Context tmap simp' rset'
 
 loadDecla (Undef (_, t) e) (Context tmap simp rset) = do
     tmap' <- addIdent t e tmap

@@ -53,11 +53,11 @@ axiom () {
 }
 
 axiom () {
-	~True >>= False
+	(~True) >>= False
 }
 
 axiom (A: Prop) {
-    ~(~A) >>= A
+    (~(~A)) >>= A
 }
 
 #axiom (A, B: Prop) {

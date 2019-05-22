@@ -11,13 +11,17 @@ import Control.Applicative
 import Parser
 import Library
 
-unify:: Expr -> Expr -> Maybe AssignMap
-unify p t = if b then Just m else Nothing where
+type TypeMap = M.Map String Expr
+
+unify:: TypeMap -> Expr -> Expr -> Maybe AssignMap
+unify tmap p t = if b then Just m else Nothing where
     (b, m) = (runState $ unifym p t) M.empty
     unifym:: Expr -> Expr -> State AssignMap Bool
     unifym Rewrite{} _ = error "Do not use Rewrite in a rule"
     unifym e (Rewrite _ a _) = unifym e a -- use newer
-    unifym (IdentExpr (_, var)) t = state $ \m-> maybe (True, M.insert var (getLatestExpr t) m) (\x-> (x `equals` t, m)) $ M.lookup var m
+    unifym e@(IdentExpr (_, var)) t = case M.lookup var tmap of
+        Just{} -> return $ equals e t -- if pattern is in global scope
+        Nothing -> state $ \m-> maybe (True, M.insert var (getLatestExpr t) m) (\x-> (x `equals` t, m)) $ M.lookup var m
     unifym (NumberExpr _ n) (NumberExpr _ n') = return $ n == n'
     unifym NumberExpr{} _ = return False
     unifym (FuncExpr f ax) (FuncExpr f' ax') = (and $ unifym' ax ax') (sameStr f f') where
@@ -56,9 +60,9 @@ addSimp m (FuncExpr (_, a) _) (FuncExpr pb@(p, b) _) = case (elemIndex a m, elem
     insertAt:: a -> Int -> [a] -> [a]
     insertAt x 0 as = x:as
     insertAt x i (a:as) = a:insertAt x (i - 1) as
-addSimp m _ (FuncExpr pb _) = writer ([], [Message pb "You can not use constants on the left side"])
-addSimp m (FuncExpr pa _) _ = return m
-addSimp m a _ = writer ([], [Message (getPosAndStr a) "Constants always have the same simplicity"]) 
+addSimp m _ (FuncExpr pb@(_, b) _) = writer (b:m, [Message pb "You can not use constants on the left side"])
+addSimp m (FuncExpr (_, a) _) _ = return $ m ++ [a]
+addSimp m a _ = writer (m, [Message (getPosAndStr a) "Constants always have the same simplicity"]) 
 
 -- どれか一つの引数に効果を適用し、同じ順番で引数を返す
 -- 適用できる引数がなかったときはNothingを返す
@@ -70,8 +74,8 @@ applyArgs f xs = applyArgs' xs [] where
 
 type RuleMap = M.Map String [Rule]
 
-simplify:: Simplicity -> RuleMap -> Expr -> Expr
-simplify smap m e = maybe e (simplify smap m) $ step m e where
+simplify:: Simplicity -> TypeMap -> RuleMap -> Expr -> Expr
+simplify smap tmap m e = maybe e (simplify smap tmap m) $ step m e where
     getSimp f = fromMaybe (error "Not in list") $ elemIndex f smap
 
     step:: RuleMap -> Expr -> Maybe Expr
@@ -85,7 +89,7 @@ simplify smap m e = maybe e (simplify smap m) $ step m e where
         lookupHeads' _ = []
 
     apply:: [Rule] -> Expr -> Maybe Expr
-    apply (r@(a, b):rs) e = maybe (apply rs e) (\m-> Just $ Rewrite (StepReason r m) (assign m b) e) (unify a e)
+    apply (r@(a, b):rs) e = maybe (apply rs e) (\m-> Just $ Rewrite (StepReason r m) (assign m b) e) (unify tmap a e)
     apply [] e = Nothing
     
     applyAtSimp:: [Rule] -> Int -> Expr -> Maybe Expr
@@ -145,8 +149,8 @@ mergeRewrite = mergeRewrite Nothing where
 
 type Derivater = (Expr, Expr) -> Maybe Expr
 
-derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
-derivate m = applyDiff derivateByRuleList where
+derivate:: RuleMap -> TypeMap -> (Expr, Expr) -> Maybe Expr
+derivate m tmap = applyDiff derivateByRuleList where
     applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
     applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if sameStr f g && length as == length bs
         then case num of
@@ -172,7 +176,7 @@ derivate m = applyDiff derivateByRuleList where
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
-        derivate' r@(ra, rb) (ta, tb) = unify ra ta >>= \m-> if assign m rb `equals` tb 
+        derivate' r@(ra, rb) (ta, tb) = unify tmap ra ta >>= \m-> if assign m rb `equals` tb 
             then Just $ Rewrite (ImplReason r m) ta tb
             else Nothing
 

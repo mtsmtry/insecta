@@ -17,10 +17,11 @@ showMessages msgs = intercalate "\n" $ map show msgs
 parseExprs str = fromMaybe [] $ evalState (parseCommaSeparated $ parseExpr M.empty) $ tokenize str
 
 showContext (Context tmap smap (rsmap, rimap)) = toJsonFormatedWith showExpr tmap ++ "\n"
-    ++ toJsonFormatedWith (show " >>= ") rsmap ++ "\n"
-    ++ toJsonFormatedWith (show " -> ") rimap 
+    ++ toJsonFormatedWith (showr " >>= ") rsmap ++ "\n"
+    ++ toJsonFormatedWith (showr " -> ") rimap ++ "\n"
+    ++ show smap
     where
-    show s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
+    showr s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
     showRule s (a, b) = showExpr a ++ s ++ showExpr b
 
 simplifyTest:: String -> String -> String
@@ -29,7 +30,7 @@ simplifyTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ct
     (minput, rest) = (runState $ parseExpr omap) (tokenize str)
     out = case minput of
         Just input -> intercalate "" steps where
-            expr = simplify smap rsmap input
+            expr = simplify smap tmap rsmap input
             steps = showSteps expr
         Nothing -> "parse error"
 
@@ -37,7 +38,7 @@ unifyTest:: String -> String
 unifyTest str = out where
     exprs = parseExprs str
     [a, b] = exprs
-    out = show $ unify a b
+    out = show $ unify M.empty a b
 
 derivateTest:: String -> String -> String
 derivateTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ctx where
@@ -45,7 +46,7 @@ derivateTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ct
     exprs = parseExprs str
     [a, b] = exprs
     out = intercalate "\n" steps where
-        expr = derivate rimap (a, b)
+        expr = derivate rimap M.empty (a, b)
         steps = maybe [] showSteps expr
 
 test x = forever $ getLine >>= (putStrLn . x)
