@@ -13,10 +13,10 @@ import Library
 import Parser
 import Rewriter
 
-data Context = Context TypeMap Simplicity (RuleMap, RuleMap)
+data Context = Context OpeMap TypeMap Simplicity (RuleMap, RuleMap)
 
 typeType = makeIdentExpr "Type"
-newContext = Context buildInScope [] (M.empty, M.empty) where
+newContext omap = Context omap buildInScope [] (M.empty, M.empty) where
     buildInTypes = ["Prop", "Char"]
     buildInScope = M.fromList $ map (, typeType) buildInTypes
 
@@ -39,11 +39,11 @@ extractExprsFromTuple (FuncExpr (_, "tuple") xs) = xs
 extractExprsFromTuple x = [x]
 
 -- (scope, expression) -> type
-evalType:: TypeMap -> Expr -> Writer [Message] (Maybe Expr)
-evalType tmap NumberExpr{} = return $ Just $ makeIdentExpr "N"
-evalType tmap StringExpr{} = return $ Just $ makeIdentExpr "Char"
-evalType tmap (IdentExpr ph@(_, h)) = maybe (writer (Nothing, [Message ph "Not defined"])) (return . Just) (M.lookup h tmap)
-evalType tmap (FuncExpr ph@(p, h) as) = maybe (writer (Nothing, [Message ph "Not defined"])) evalFuncRetType (M.lookup h tmap) 
+evalType:: OpeMap -> TypeMap -> Expr -> Writer [Message] (Maybe Expr)
+evalType omap tmap NumberExpr{} = return $ Just $ makeIdentExpr "N"
+evalType omap tmap StringExpr{} = return $ Just $ makeIdentExpr "Char"
+evalType omap tmap (IdentExpr ph@(_, h)) = maybe (writer (Nothing, [Message ph "Not defined"])) (return . Just) (M.lookup h tmap)
+evalType omap tmap (FuncExpr ph@(p, h) as) = maybe (writer (Nothing, [Message ph "Not defined"])) evalFuncRetType (M.lookup h tmap) 
     where
     -- function type -> function return type
     evalFuncRetType:: Expr -> Writer [Message] (Maybe Expr)
@@ -59,9 +59,9 @@ evalType tmap (FuncExpr ph@(p, h) as) = maybe (writer (Nothing, [Message ph "Not
     checkArgs _ [] = writer (False, [Message ph "Too many arguments"])
     checkArgs (a:as) (t:ts) = checkType >>= \x-> let (a, msgs) = runWriter (checkArgs as ts) in writer (a||x, msgs) where
         checkType:: Writer [Message] Bool
-        checkType = evalType tmap a >>= maybe (return False) (\x-> if equals t x 
+        checkType = evalType omap tmap a >>= maybe (return False) (\x-> if equals t x 
             then return True 
-            else writer (False, [Message (showCodeExpr a) ("Couldn't match expected type '" ++ showExpr x ++ "' with actual type '" ++ showExpr t ++ "'")]))
+            else writer (False, [Message (showCodeExpr omap a) ("Couldn't match expected type '" ++ showExpr omap x ++ "' with actual type '" ++ showExpr omap t ++ "'")]))
 
 -- (argument types, return type) -> function type
 makeFuncType:: [Expr] -> Expr -> Expr
@@ -73,104 +73,104 @@ addIdent:: String -> Expr -> TypeMap -> Writer [Message] TypeMap
 addIdent i t m = return $ M.insert i t m
 
 -- (outer scope, variable declarations) -> output scope
-makeScope:: TypeMap -> VarDec -> Writer [Message] TypeMap
-makeScope gm xs = makeScope' gm xs M.empty where
+makeScope:: OpeMap -> TypeMap -> VarDec -> Writer [Message] TypeMap
+makeScope omap gm xs = makeScope' gm xs M.empty where
     makeScope' gm [] lm = return lm
-    makeScope' gm ((ps@(p, s), e):xs) lm = evalType gm e
+    makeScope' gm ((ps@(p, s), e):xs) lm = evalType omap gm e
         >>= maybe (return lm) (\x-> if isTypeType x 
                 then return $ M.insert s e lm 
                 else writer (lm, [Message ps "Not type"]))
         >>= makeScope' gm xs
 
 -- (scope, expression) -> (is step rule, rule)
-makeRule:: Simplicity -> TypeMap -> Expr -> Writer [Message] (Maybe (Bool, String, Rule, Simplicity))
-makeRule smap tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = case kind of
+makeRule:: OpeMap -> Simplicity -> TypeMap -> Expr -> Writer [Message] (Maybe (Bool, String, Rule, Simplicity))
+makeRule omap smap tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = case kind of
     ">>=" -> do
-        at' <- evalType tmap a
-        bt' <- evalType tmap b
+        at' <- evalType omap tmap a
+        bt' <- evalType omap tmap b
         case (at', bt') of
             (Just at, Just bt)-> if equals at bt
                 then do 
                     smap' <- addSimp smap a b
                     return $ Just (True, h, (a, b), smap') 
                 else writer (Nothing, [Message pk $ x ++ y]) where
-                    x = "Left side type is '" ++ showExpr at ++ "', "
-                    y = "but right side type is '" ++ showExpr bt ++ "'"
+                    x = "Left side type is '" ++ showExpr omap at ++ "', "
+                    y = "but right side type is '" ++ showExpr omap bt ++ "'"
             _-> return Nothing
     "->" -> do
-        et' <- evalType tmap e
+        et' <- evalType omap tmap e
         case et' of
             Just et-> if isIdentOf "Prop" et 
                 then return $ Just (False, h, (a, b), smap)
-                else writer (Nothing, [Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ showExpr et ++ "'"])
+                else writer (Nothing, [Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ showExpr omap et ++ "'"])
             Nothing-> return Nothing
     f -> writer (Nothing, [Message pk "Wrong function"])
-makeRule _ _ e@(FuncExpr _ _) = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
-makeRule _ _ e = writer (Nothing, [Message (showCodeExpr e) "This is not a function"])
+makeRule omap _ _ e@(FuncExpr _ _) = writer (Nothing, [Message (showCodeExpr omap e) "This is not a function"])
+makeRule omap _ _ e = writer (Nothing, [Message (showCodeExpr omap e) "This is not a function"])
 
-insertRule:: Simplicity -> TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] ((RuleMap, RuleMap), Simplicity)
-insertRule simp tmap prop rset@(smap, imap) = do
-    mrule <- makeRule simp tmap prop
+insertRule:: OpeMap -> Simplicity -> TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] ((RuleMap, RuleMap), Simplicity)
+insertRule omap simp tmap prop rset@(smap, imap) = do
+    mrule <- makeRule omap simp tmap prop
     return $ case mrule of
         Just (True, name, rule, simp') -> ((M.insertWith (++) name [rule] smap, imap), simp')
         Just (False, name, rule, simp') -> ((smap, M.insertWith (++) name [rule] imap), simp')
         Nothing -> (rset, simp)
 
-runCommand:: Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
-runCommand simp tmap (smap, _) StepCmd goal input = case mergeRewrite strg sgoal of
+runCommand:: OpeMap -> Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
+runCommand omap simp tmap (smap, _) StepCmd goal input = case mergeRewrite strg sgoal of
     Just proof -> return strg
-    Nothing -> writer (sgoal, [Message (showCodeExpr goal) $ "Couldn't match simplified terms with '" ++ 
-        showLatestExpr strg ++ "' and '" ++ showLatestExpr sgoal ++ "'"])
+    Nothing -> writer (sgoal, [Message (showCodeExpr omap goal) $ "Couldn't match simplified terms with '" ++ 
+        showLatestExpr omap strg ++ "' and '" ++ showLatestExpr omap sgoal ++ "'"])
     where 
         (strg, sgoal) = (simplify simp tmap smap input, simplify simp tmap smap goal)
-runCommand s tmap (_, imap) ImplCmd goal input = case derivate imap tmap (input, goal) of
+runCommand omap s tmap (_, imap) ImplCmd goal input = case derivate imap tmap (input, goal) of
     Just proof -> return proof
-    Nothing -> (writer (goal, [Message (showCodeExpr goal) $ "Couldn't derivate from '" ++ showLatestExpr input ++ "'"]))
+    Nothing -> (writer (goal, [Message (showCodeExpr omap goal) $ "Couldn't derivate from '" ++ showLatestExpr omap input ++ "'"]))
 
-runStatement:: Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Expr -> Statement -> Writer [Message] Expr
-runStatement simp tmap rmap input = \case
-    SingleStm cmd goal -> runCommand simp tmap rmap cmd goal input
+runStatement:: OpeMap -> Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Expr -> Statement -> Writer [Message] Expr
+runStatement omap simp tmap rmap input = \case
+    SingleStm cmd goal -> runCommand omap simp tmap rmap cmd goal input
     AssumeStm cmd ass first main -> do
         -- P => X -> [A, B, C]
         -- [P, Q, X -> [A, B, C]]
-        begin <- runCommand simp tmap rmap cmd input (FuncExpr (NonePosition, "->") [ass, first])
-        block <- runStatement simp tmap rmap first main
+        begin <- runCommand omap simp tmap rmap cmd input (FuncExpr (NonePosition, "->") [ass, first])
+        block <- runStatement omap simp tmap rmap first main
         return $ Rewrite EqualReason begin (FuncExpr (NonePosition, "->") [ass, block])
     BlockStm stms -> runStms stms input where 
         runStms:: [Statement] -> Expr -> Writer [Message] Expr
         runStms (x:xs) input = do
-            ntrg <- runStatement simp tmap rmap input x
+            ntrg <- runStatement omap simp tmap rmap input x
             runStms xs ntrg
 
 -- reflect a declaration in the global scope and analyze type and proof
 loadDecla:: Decla -> Context -> Writer [Message] Context
-loadDecla (Theorem dec prop stm) (Context tmap simp rset) = do
-    lm <- makeScope tmap dec
+loadDecla (Theorem dec prop stm) (Context omap tmap simp rset) = do
+    lm <- makeScope omap tmap dec
     let scope = M.union lm tmap
-    res <- runStatement simp tmap rset prop stm
-    (rset', simp') <- insertRule simp scope prop rset
-    return $ Context tmap simp' rset'
+    res <- runStatement omap simp tmap rset prop stm
+    (rset', simp') <- insertRule omap simp scope prop rset
+    return $ Context omap tmap simp' rset'
 
-loadDecla (Axiom dec prop) (Context tmap simp rset) = do
-    lm <- makeScope tmap dec
+loadDecla (Axiom dec prop) (Context omap tmap simp rset) = do
+    lm <- makeScope omap tmap dec
     let scope = M.union lm tmap
-    (rset', simp')  <- insertRule simp scope prop rset
-    return $ Context tmap simp' rset'
+    (rset', simp')  <- insertRule omap simp scope prop rset
+    return $ Context omap tmap simp' rset'
 
-loadDecla (Undef (_, t) e) (Context tmap simp rset) = do
+loadDecla (Undef (_, t) e) (Context omap tmap simp rset) = do
     tmap' <- addIdent t e tmap
-    return $ Context tmap' simp rset
+    return $ Context omap tmap' simp rset
 
-loadDecla (Define (_, t) args ret def) (Context tmap simp rset) = do
-    lm <- makeScope tmap args
+loadDecla (Define (_, t) args ret def) (Context omap tmap simp rset) = do
+    lm <- makeScope omap tmap args
     let scope = M.union lm tmap
     tmap' <- addIdent t (makeFuncType (map snd args) ret) tmap
-    return $ Context tmap' simp rset
+    return $ Context omap tmap' simp rset
 
-loadDecla (DataType (p, t) def) (Context tmap simp rset) = do
+loadDecla (DataType (p, t) def) (Context omap tmap simp rset) = do
     tmap' <- addIdent t (makeIdentExpr "Type") tmap
     addCstr cstrs tmap'
-    return $ Context tmap' simp rset
+    return $ Context omap tmap' simp rset
     where
     thisType = makeIdentExpr t
     cstrs = extractArgs "|" def
@@ -179,7 +179,7 @@ loadDecla (DataType (p, t) def) (Context tmap simp rset) = do
     addCstr [] m = return m
     addCstr (IdentExpr (_, i):xs) m = addIdent i thisType m >>= addCstr xs
     addCstr (FuncExpr (_, i) as:xs) m = do
-        argsm <- mapM (evalType m) as
+        argsm <- mapM (evalType omap m) as
         let run x = maybe (return m) x (conjMaybe argsm)
         run $ \args-> do
             let cstrType = makeFuncType args thisType
@@ -189,11 +189,8 @@ loadDecla (DataType (p, t) def) (Context tmap simp rset) = do
 
 loadDecla _ ctx = return ctx
 
-buildProgram::String -> Writer [Message] (OpeMap, Context)
-buildProgram prg = do 
-    ctx <- loadDeclas declas newContext
-    return (omap, ctx)
-    where
+buildProgram::String -> Writer [Message] Context
+buildProgram prg = loadDeclas declas $ newContext omap where
     tokens = tokenize prg
     ((declas, omap), rest) = runState parseProgram tokens
     loadDeclas xs ctx = foldM (flip loadDecla) ctx xs

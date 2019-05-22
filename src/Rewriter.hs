@@ -76,7 +76,7 @@ type RuleMap = M.Map String [Rule]
 
 simplify:: Simplicity -> TypeMap -> RuleMap -> Expr -> Expr
 simplify smap tmap m e = maybe e (simplify smap tmap m) $ step m e where
-    getSimp f = fromMaybe (error "Not in list") $ elemIndex f smap
+    getSimp f = fromMaybe (-1) $ elemIndex f smap
 
     step:: RuleMap -> Expr -> Maybe Expr
     step m e = applyByHeadList m heads e where
@@ -190,17 +190,17 @@ getOldestExpr:: Expr -> Expr
 getOldestExpr (Rewrite _ _ b) = getOldestExpr b
 getOldestExpr e = e 
 
-showSteps:: Expr -> [String]
-showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
+showSteps:: OpeMap -> Expr -> [String]
+showSteps omap x = map show $ reverse $ showSteps' [(Nothing, x)] x where
     show::(Maybe Reason, Expr) -> String
-    show (r, e) = showOldestExpr e ++ " " ++ maybe "" (\x-> "[" ++ showReason x ++ "]") r
+    show (r, e) = showOldestExpr omap e ++ " " ++ maybe "" (\x-> "[" ++ showReason x ++ "]") r
 
     showSteps':: [(Maybe Reason, Expr)] -> Expr -> [(Maybe Reason, Expr)]
     showSteps' p e = maybe p (\x@(_, t)-> showSteps' (x:p) t) $ nextStep e
 
     showReason:: Reason -> String
-    showReason (StepReason (a, b) asg) = showExpr a ++ " >>= " ++ showExpr b ++ " " ++ toJsonWith showExpr asg
-    showReason (ImplReason (a, b) asg) = showExpr a ++ " -> " ++ showExpr b ++ " " ++ toJsonWith showExpr asg
+    showReason (StepReason (a, b) asg) = showExpr omap a ++ " >>= " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
+    showReason (ImplReason (a, b) asg) = showExpr omap a ++ " -> " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
     showReason EqualReason = ""
 
     nextStep:: Expr -> Maybe (Maybe Reason, Expr)
@@ -214,35 +214,39 @@ showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
         applyArgs' [] _ = Nothing
         applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\(r, e)-> Just (r, reverse (e:as') ++ as)) (f a)
 
-showFuncExpr:: (Expr -> String) -> PosStr -> [Expr]-> String
-showFuncExpr fshow (_, "tuple") as = "(" ++ intercalate ", " (map fshow as) ++ ")"
-showFuncExpr fshow (_, f) as = if isAlpha (head f) || length as /= 2 
-    then f ++ "(" ++ intercalate ", " (map fshow as) ++ ")"
-    else let [a, b] = as in fshow a ++ f ++ fshow b 
+showFuncExpr:: OpeMap -> (OpeMap -> Expr -> String) -> PosStr -> [Expr]-> String
+showFuncExpr omap fshow (_, "tuple") as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
+showFuncExpr omap fshow (_, f) as
+    | not (isAlpha (head f)) && length as == 2 = let [a, b] = as in bshow a ++ f ++ bshow b
+    | not (isAlpha (head f)) && length as == 1 = f ++ bshow (head as)
+    | otherwise = f ++ "(" ++ intercalate ", " (map (fshow omap) as) ++ ")" where
+        getPre h = maybe (-1) (\(_, x, _)-> x) $ M.lookup h omap
+        bshow e@(FuncExpr (_, g) as) = if getPre f > getPre g then "(" ++ fshow omap e ++ ")" else fshow omap e
+        bshow e = fshow omap e
 
-showExpr:: Expr -> String
-showExpr (Rewrite _ a b) = "rewrite[" ++ showExpr a ++ ", " ++ showExpr b ++ "]"  -- error "Can not use Rewrite"
-showExpr (StringExpr (_, s)) = "\"" ++ s ++ "\"" 
-showExpr (IdentExpr (_, x)) = x
-showExpr (NumberExpr _ n) = show n
-showExpr (FuncExpr f as) = showFuncExpr showExpr f as
+showExpr:: OpeMap -> Expr -> String
+showExpr omap (Rewrite _ a b) = "rewrite[" ++ showExpr omap a ++ ", " ++ showExpr omap b ++ "]"  -- error "Can not use Rewrite"
+showExpr omap (StringExpr (_, s)) = "\"" ++ s ++ "\"" 
+showExpr omap (IdentExpr (_, x)) = x
+showExpr omap (NumberExpr _ n) = show n
+showExpr omap (FuncExpr f as) = showFuncExpr omap showExpr f as
 
-showLatestExpr (Rewrite _ a _) = showLatestExpr a
-showLatestExpr (FuncExpr f as) = showFuncExpr showLatestExpr f as
-showLatestExpr e = showExpr e
+showLatestExpr omap (Rewrite _ a _) = showLatestExpr omap a
+showLatestExpr omap (FuncExpr f as) = showFuncExpr omap showLatestExpr f as
+showLatestExpr omap e = showExpr omap e
 
-showOldestExpr (Rewrite _ _ b) = showLatestExpr b
-showOldestExpr (FuncExpr f as) = showFuncExpr showOldestExpr f as
-showOldestExpr e = showExpr e
+showOldestExpr omap (Rewrite _ _ b) = showLatestExpr omap b
+showOldestExpr omap (FuncExpr f as) = showFuncExpr omap showOldestExpr f as
+showOldestExpr omap e = showExpr omap e
 
-showExprAsRewrites:: Expr -> String
-showExprAsRewrites e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
-    steps = map showExprAsRewrites $ expandRewrite e
+showExprAsRewrites:: OpeMap -> Expr -> String
+showExprAsRewrites omap e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
+    steps = map (showExprAsRewrites omap) $ expandRewrite e
     expandRewrite:: Expr -> [Expr]
     expandRewrite (Rewrite e a b) = expandRewrite b ++ expandRewrite a
     expandRewrite e = [e]
-showExprAsRewrites (FuncExpr h as) = showFuncExpr showExprAsRewrites h as
-showExprAsRewrites e = showExpr e
+showExprAsRewrites omap (FuncExpr h as) = showFuncExpr omap showExprAsRewrites h as
+showExprAsRewrites omap e = showExpr omap e
 
 getExprPos:: Expr -> Position
 getExprPos (StringExpr (p, _)) = p
@@ -250,8 +254,8 @@ getExprPos (IdentExpr (p, _)) = p
 getExprPos (NumberExpr p _) = p
 getExprPos (FuncExpr (p, _) _) = p
 
-showCodeExpr:: Expr -> PosStr
-showCodeExpr e = (getExprPos e, showOldestExpr e)
+showCodeExpr:: OpeMap -> Expr -> PosStr
+showCodeExpr omap e = (getExprPos e, showOldestExpr omap e)
 
 extractMaybe:: [Maybe a] -> [a]
 extractMaybe [] = []
