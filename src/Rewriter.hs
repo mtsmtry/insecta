@@ -61,7 +61,7 @@ addSimp m (FuncExpr (_, a) _) (FuncExpr pb@(p, b) _) = case (elemIndex a m, elem
     insertAt x 0 as = x:as
     insertAt x i (a:as) = a:insertAt x (i - 1) as
 addSimp m _ (FuncExpr pb@(_, b) _) = writer (b:m, [Message pb "You can not use constants on the left side"])
-addSimp m (FuncExpr (_, a) _) _ = return $ m ++ [a]
+addSimp m (FuncExpr (_, a) _) _ = return $ if a `elem` m then m else a:m
 addSimp m a _ = writer (m, [Message (getPosAndStr a) "Constants always have the same simplicity"]) 
 
 -- どれか一つの引数に効果を適用し、同じ順番で引数を返す
@@ -154,8 +154,8 @@ derivate m tmap = applyDiff derivateByRuleList where
     applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
     applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if sameStr f g && length as == length bs
         then case num of
-            0 -> Nothing-- if length as == 1 then d (head as, head bs) else Nothing
-            1 -> d x >>= \t-> Just $ FuncExpr f (map snd xs' ++ t:map snd xs) where
+            0 -> Nothing
+            1 -> derivate m tmap x >>= \t-> Just $ FuncExpr f (map snd xs' ++ t:map snd xs) where
                 (xs', x:xs) = splitAt idx args
             _ -> d pair
         else d pair where
@@ -169,27 +169,26 @@ derivate m tmap = applyDiff derivateByRuleList where
                 encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
                 encount' p _ [] = p
     applyDiff d pair = d pair
+
     derivateByRuleList::Derivater
     derivateByRuleList pair@(FuncExpr (_, h) as, goal) = M.lookup h m 
-        >>= foldr ((<|>) . (flip derivateByRule) pair) Nothing
+        >>= foldr ((<|>) . flip derivateByRule pair) Nothing
     derivateByRuleList _ = Nothing
+
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
         derivate' r@(ra, rb) (ta, tb) = unify tmap ra ta >>= \m-> if assign m rb `equals` tb 
-            then Just $ Rewrite (ImplReason r m) ta tb
+            then Just $ Rewrite (ImplReason r m) tb ta
             else Nothing
 
 getLatestExpr:: Expr -> Expr
-getLatestExpr (Rewrite _ a _) = a
+getLatestExpr (Rewrite _ a _) = getLatestExpr a
 getLatestExpr e = e 
 
 getOldestExpr:: Expr -> Expr
-getOldestExpr (Rewrite _ _ b) = b
+getOldestExpr (Rewrite _ _ b) = getOldestExpr b
 getOldestExpr e = e 
-
-showLatestExpr = showExpr . getLatestExpr
-showOldestExpr = showExpr . getOldestExpr
 
 showSteps:: Expr -> [String]
 showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
@@ -213,7 +212,7 @@ showSteps x = map show $ reverse $ showSteps' [(Nothing, x)] x where
     applyArgs f xs = applyArgs' xs [] where
         applyArgs':: [Expr] -> [Expr] -> Maybe (Maybe Reason, [Expr])
         applyArgs' [] _ = Nothing
-        applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\(r, e)-> Just (r, reverse (x:as') ++ as)) (f a)
+        applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\(r, e)-> Just (r, reverse (e:as') ++ as)) (f a)
 
 showFuncExpr:: (Expr -> String) -> PosStr -> [Expr]-> String
 showFuncExpr fshow (_, "tuple") as = "(" ++ intercalate ", " (map fshow as) ++ ")"
@@ -222,11 +221,19 @@ showFuncExpr fshow (_, f) as = if isAlpha (head f) || length as /= 2
     else let [a, b] = as in fshow a ++ f ++ fshow b 
 
 showExpr:: Expr -> String
-showExpr (Rewrite _ a b) = error "Can not use Rewrite"
+showExpr (Rewrite _ a b) = "rewrite[" ++ showExpr a ++ ", " ++ showExpr b ++ "]"  -- error "Can not use Rewrite"
 showExpr (StringExpr (_, s)) = "\"" ++ s ++ "\"" 
 showExpr (IdentExpr (_, x)) = x
 showExpr (NumberExpr _ n) = show n
 showExpr (FuncExpr f as) = showFuncExpr showExpr f as
+
+showLatestExpr (Rewrite _ a _) = showLatestExpr a
+showLatestExpr (FuncExpr f as) = showFuncExpr showLatestExpr f as
+showLatestExpr e = showExpr e
+
+showOldestExpr (Rewrite _ _ b) = showLatestExpr b
+showOldestExpr (FuncExpr f as) = showFuncExpr showOldestExpr f as
+showOldestExpr e = showExpr e
 
 showExprAsRewrites:: Expr -> String
 showExprAsRewrites e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where

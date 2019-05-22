@@ -24,7 +24,7 @@ extra-source-files:
 author: Author name here
 github: githubuser/lightmath
 license: BSD3
-default-extensions: LambdaCase
+default-extensions: LambdaCase, TupleSections
 executables:
   lightmath-exe:
     source-dirs: app

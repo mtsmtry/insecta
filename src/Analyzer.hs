@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 module Analyzer where
 import Data.Char
 import Data.List
@@ -17,7 +18,7 @@ data Context = Context TypeMap Simplicity (RuleMap, RuleMap)
 typeType = makeIdentExpr "Type"
 newContext = Context buildInScope [] (M.empty, M.empty) where
     buildInTypes = ["Prop", "Char"]
-    buildInScope = M.fromList $ map (\x-> (x, typeType)) buildInTypes
+    buildInScope = M.fromList $ map (, typeType) buildInTypes
 
 isIdentOf:: String -> Expr -> Bool
 isIdentOf t (IdentExpr (_, s)) = t == s
@@ -195,7 +196,4 @@ buildProgram prg = do
     where
     tokens = tokenize prg
     ((declas, omap), rest) = runState parseProgram tokens
-    loadDeclas [] ctx = return ctx
-    loadDeclas (x:xs) ctx = do
-        ctx' <- loadDecla x ctx
-        loadDeclas xs ctx'
+    loadDeclas xs ctx = foldM (flip loadDecla) ctx xs

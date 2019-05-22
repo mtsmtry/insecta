@@ -24,15 +24,18 @@ showContext (Context tmap smap (rsmap, rimap)) = toJsonFormatedWith showExpr tma
     showr s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
     showRule s (a, b) = showExpr a ++ s ++ showExpr b
 
-simplifyTest:: String -> String -> String
-simplifyTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ctx where
+reasoningTest:: String -> String -> String
+reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ out where
     ((omap, ctx@(Context tmap smap (rsmap, rimap))), msg) = runWriter $ buildProgram prg
-    (minput, rest) = (runState $ parseExpr omap) (tokenize str)
-    out = case minput of
-        Just input -> intercalate "" steps where
+    exprs = parseExprs str
+    out = case exprs of
+        [a, b] -> intercalate "\n" steps where
+            expr = derivate rimap tmap (a, b)
+            steps = maybe [] showSteps expr
+        [input] -> intercalate "\n" steps where
             expr = simplify smap tmap rsmap input
             steps = showSteps expr
-        Nothing -> "parse error"
+        _ -> "parse error"
 
 unifyTest:: String -> String
 unifyTest str = out where
@@ -40,20 +43,8 @@ unifyTest str = out where
     [a, b] = exprs
     out = show $ unify M.empty a b
 
-derivateTest:: String -> String -> String
-derivateTest prg str = out ++ "\n" ++ showMessages msg ++ "\n" ++ showContext ctx where
-    ((omap, ctx@(Context tmap smap (rsmap, rimap))), msg) = runWriter $ buildProgram prg
-    exprs = parseExprs str
-    [a, b] = exprs
-    out = intercalate "\n" steps where
-        expr = derivate rimap M.empty (a, b)
-        steps = maybe [] showSteps expr
-
 test x = forever $ getLine >>= (putStrLn . x)
 testFunc2 = test $ parserTest $ parseDecla M.empty
-testFunc' = do
-    file <- readFile "test.txt"
-    test $ derivateTest file
 testFunc = do
     file <- readFile "test.txt"
-    test $ simplifyTest file
+    test $ reasoningTest file
