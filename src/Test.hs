@@ -11,9 +11,10 @@ import Rewriter
 import Analyzer
 
 lexer str = (\(_, _, _, x)-> x) $ runLexer tokenize (initialPosition, str)
+parser p t = (\(_, _, x)-> x) $ runParser p t
 
 tokenizeTest line = intercalate "," $ map show $ lexer line
-parserTest x = show . runParser x . lexer
+parserTest x = show . parser x . lexer
 
 showMessages msgs = intercalate "\n" $ map show msgs
 parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str)
@@ -47,7 +48,7 @@ unifyTest str = out where
     out = show $ unify M.empty a b
 
 test x = forever $ getLine >>= (putStrLn . x)
-testFunc2 = test $ parserTest $ parseDecla M.empty
+testFunc2 = test $ parserTest $ parseExpr M.empty
 testFunc = do
     file <- readFile "test.txt"
     test $ reasoningTest file

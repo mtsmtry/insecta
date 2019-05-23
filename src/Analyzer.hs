@@ -13,7 +13,24 @@ import Library
 import Parser
 import Rewriter
 
-data Context = Context OpeMap TypeMap Simplicity (RuleMap, RuleMap)
+data Context = Context { ope::OpeMap, type::TypeMap, simp::Simplicity, rule::(RuleMap, RuleMap) }
+
+newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
+
+instance Functor Analyzer where
+    fmap f (Analyzer g) = Analyzer $ \ctx -> let (msg, ctx', x) = g ctx in (msg, ctx', f x)
+
+instance Applicative Analyzer where
+    pure = return
+    a <*> b = a >>= (<$> b)
+
+instance Monad Analyzer where
+    return x = Analyzer $ \(t, s) -> ([], t, s, x)
+    (Analyzer h) >>= f = Analyzer $ \ts ->
+        let (msg, ctx, x) = h ts
+            (Analyzer g) = f x
+            (msg', ctx', x') = g ctx'
+        in  (msg ++ msg', ctx', x')
 
 typeType = makeIdentExpr "Type"
 newContext omap = Context omap buildInScope [] (M.empty, M.empty) where
@@ -83,7 +100,7 @@ makeScope omap gm xs = makeScope' gm xs M.empty where
         >>= makeScope' gm xs
 
 -- (scope, expression) -> (is step rule, rule)
-makeRule:: OpeMap -> Simplicity -> TypeMap -> Expr -> Writer [Message] (Maybe (Bool, String, Rule, Simplicity))
+makeRule:: Context -> Expr -> Writer [Message] (Maybe (Bool, String, Rule, Simplicity))
 makeRule omap smap tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = case kind of
     ">>=" -> do
         at' <- evalType omap tmap a
@@ -108,7 +125,7 @@ makeRule omap smap tmap e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = c
 makeRule omap _ _ e@(FuncExpr _ _) = writer (Nothing, [Message (showCodeExpr omap e) "This is not a function"])
 makeRule omap _ _ e = writer (Nothing, [Message (showCodeExpr omap e) "This is not a function"])
 
-insertRule:: OpeMap -> Simplicity -> TypeMap -> Expr -> (RuleMap, RuleMap) -> Writer [Message] ((RuleMap, RuleMap), Simplicity)
+insertRule:: Context -> Expr -> (RuleMap, RuleMap) -> Writer [Message] ((RuleMap, RuleMap), Simplicity)
 insertRule omap simp tmap prop rset@(smap, imap) = do
     mrule <- makeRule omap simp tmap prop
     return $ case mrule of
@@ -116,7 +133,7 @@ insertRule omap simp tmap prop rset@(smap, imap) = do
         Just (False, name, rule, simp') -> ((smap, M.insertWith (++) name [rule] imap), simp')
         Nothing -> (rset, simp)
 
-runCommand:: OpeMap -> Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
+runCommand:: Context -> (RuleMap, RuleMap) -> Command -> Expr -> Expr -> Writer [Message] Expr
 runCommand omap simp tmap (smap, _) StepCmd goal input = case mergeRewrite strg sgoal of
     Just proof -> return strg
     Nothing -> writer (sgoal, [Message (showCodeExpr omap goal) $ "Couldn't match simplified terms with '" ++ 
@@ -127,7 +144,7 @@ runCommand omap s tmap (_, imap) ImplCmd goal input = case derivate imap tmap (i
     Just proof -> return proof
     Nothing -> (writer (goal, [Message (showCodeExpr omap goal) $ "Couldn't derivate from '" ++ showLatestExpr omap input ++ "'"]))
 
-runStatement:: OpeMap -> Simplicity -> TypeMap -> (RuleMap, RuleMap) -> Expr -> Statement -> Writer [Message] Expr
+runStatement:: Context -> (RuleMap, RuleMap) -> Expr -> Statement -> Writer [Message] Expr
 runStatement omap simp tmap rmap input = \case
     SingleStm cmd goal -> runCommand omap simp tmap rmap cmd goal input
     AssumeStm cmd ass first main -> do
