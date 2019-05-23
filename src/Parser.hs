@@ -12,6 +12,25 @@ import Control.Arrow
 import Control.Applicative
 import Library
 
+newtype Parser a = Parser { runParser::[PosToken] -> ([Message], [PosToken], a) }
+
+instance Functor Parser where
+    fmap f (Parser g) = Parser $ \ts -> let (m, ts', x) = g ts in (m, ts', f x)
+
+instance Applicative Parser where
+    pure = return
+    a <*> b = do
+        f <- a
+        f <$> b
+
+instance Monad Parser where
+    return x = Parser ([], , x)
+    (Parser h) >>= f = Parser $ \ts ->
+        let (m, ts', x) = h ts
+            (Parser g) = f x
+            (m', ts'', x') = g ts'
+        in  (m ++ m', ts'', x')
+
 -- Position(Line, Char)
 data Position = Position Int Int | NonePosition deriving (Show)
 
@@ -115,13 +134,13 @@ getPosAndStr (Rewrite _ a _) = getPosAndStr a
 getPosAndStr (FuncExpr ps _) = ps
 
 -- parse expression by shunting yard algorithm
-parseExpr:: OpeMap -> State [PosToken] (Maybe ([Message], Expr))
-parseExpr omap = state $ \ts-> parseExpr ts [] [] where
+parseExpr:: OpeMap -> Parser (Maybe Expr)
+parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
     -- (input tokens, operation stack, expression queue) -> (expression, rest token)
-    parseExpr:: [PosToken] -> [(PosToken, Int)] -> [Expr] -> (Maybe ([Message], Expr), [PosToken])
-    parseExpr [] s q = (Just ([], head $ makeExpr s q), [])
+    parseExpr:: [PosToken] -> [(PosToken, Int)] -> [Expr] -> ([Message], [PosToken], Maybe Expr)
+    parseExpr [] s q = ([], [], Just $ head $ makeExpr s q)
     parseExpr all@(px@(PosToken p x):xs) s q = case x of
-        Error t m   -> (Nothing, all)
+        Error t m   -> ([], all, Nothing)
         Number n    -> maybeEnd $ parseExpr xs s (NumberExpr p n:q)
         Ident i     -> maybeEnd $ case xs of
             (po@(PosToken _ ParenOpen):xs')-> parseExpr xs' ((po, 2):(px, 1):s) q
@@ -139,7 +158,7 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
         Symbol{} -> result
         where
             isParenOpen = \case PosToken _ ParenOpen -> True; _ -> False
-            result = (Just ([], head $ makeExpr s q), all)
+            result = ([], all, Just $ head $ makeExpr s q)
             maybeEnd a = if sum (map ((-1+) . snd) s) + 1 == length q then result else a
     tuple = PosToken NonePosition (Ident "tuple")
     -- ((operator or function token, argument number), input) -> output
@@ -162,71 +181,73 @@ parseExpr omap = state $ \ts-> parseExpr ts [] [] where
         where (_, bpre, bleft) = fromMaybe defaultOpe $ M.lookup t omap
 
 -- atom parsers
-parseToken:: Token -> State [PosToken] (Maybe ([Message], Token))
-parseToken x = state $ \case
-    [] -> (Nothing, [])
-    all@((PosToken _ t):ts) -> if t == x then (Just ([], x), ts) else (Nothing, all)
+parseToken:: Token -> Parser (Maybe Token)
+parseToken x = Parser $ \case
+    [] -> ([], [], Nothing)
+    all@((PosToken _ t):ts) -> if t == x then ([], ts, Just x) else ([], all, Nothing)
 parseSymbol x = parseToken (Symbol x)
 parseOperator x = parseToken (Operator x)
 
-parseAnyOperator:: State [PosToken] (Maybe ([Message], PosStr))
-parseAnyOperator = state $ \case
-    [] -> (Nothing, [])
-    (PosToken p (Operator s):ts) -> (Just ([], (p, s)), ts)
-    all -> (Nothing, all)
+parseAnyOperator:: Parser (Maybe PosStr)
+parseAnyOperator = Parser $ \case
+    [] -> ([], [], Nothing)
+    (PosToken p (Operator s):ts) -> ([], ts, Just (p, s))
+    all -> ([], all, Nothing)
 
-parseNumber:: State [PosToken] (Maybe ([Message], Int))
-parseNumber = state $ \case
-    [] -> (Nothing, [])
-    all@((PosToken _ t):ts) -> case t of Number n-> (Just ([], n), ts); _-> ( Nothing, all)
+parseNumber:: Parser (Maybe Int)
+parseNumber = Parser $ \case
+    [] -> ([], [], Nothing)
+    all@((PosToken _ t):ts) -> case t of Number n-> ([], ts, Just n); _-> ([], all, Nothing)
 
-parseIdent:: State [PosToken] (Maybe ([Message], PosStr))
-parseIdent = state $ \case
-    [] -> (Nothing, [])
-    (PosToken _ (Ident "operator"):PosToken p (Operator s):ts) -> (Just ([], (p, s)), ts)
-    (PosToken p (Ident s):ts) -> (Just ([], (p, s)), ts)
-    all -> (Nothing, all)
+parseIdent:: Parser (Maybe PosStr)
+parseIdent = Parser $ \case
+    [] -> ([], [], Nothing)
+    (PosToken _ (Ident "operator"):PosToken p (Operator s):ts) -> ([], ts, Just (p, s))
+    (PosToken p (Ident s):ts) -> ([], ts, Just (p, s))
+    all -> ([], all, Nothing)
 
-parseSeparated:: State [PosToken] (Maybe ([Message], s)) -> State [PosToken] (Maybe ([Message], a)) -> State [PosToken] (Maybe ([Message], [a]))
+parseSeparated:: Parser (Maybe s) -> Parser (Maybe a) -> Parser [a]
 parseSeparated s p = p >>= \case
-    Just (m, x') -> s >>= \case
-        Just _ -> parseSeparated s p >>= \case
-            Just (m', r') -> return $ Just (m ++ m', (x':r'))
-            Nothing -> return Nothing
-        Nothing -> return $ Just (m, [x'])
-    Nothing -> return $ Just ([], [])
+    Just x' -> s >>= \case
+        Just _ -> parseSeparated s p >>= \r' -> return (x':r')
+        Nothing -> return [x']
+    Nothing -> return []
 
 -- parser connecters
 infixl 1 <++>
-(<++>):: State [PosToken] (Maybe ([Message], (a->b))) -> State [PosToken] (Maybe ([Message], a)) -> State [PosToken] (Maybe ([Message], b))
+(<++>):: Parser (Maybe (a->b)) -> Parser (Maybe a) -> Parser (Maybe b)
 former <++> latter = former >>= \case
-    Just (m, f) -> latter >>= \case
-            Just (m', x) -> return $ Just (m ++ m', f x)
+    Just f -> latter >>= \case
+            Just x -> return $ Just (f x)
             Nothing -> return Nothing
+    Nothing -> return Nothing
+
+infixl 1 <&&>
+(<&&>):: Parser (Maybe (a->b)) -> Parser a -> Parser (Maybe b)
+former <&&> latter = former >>= \case
+    Just f -> latter >>= return . Just . f
     Nothing -> return Nothing
 
 infixl 1 <::>
-(<::>):: State [PosToken] (Maybe ([Message], a)) -> State [PosToken] (Maybe ([Message], b)) -> State [PosToken] (Maybe ([Message], a))
+(<::>):: Parser (Maybe a) -> Parser (Maybe b) -> Parser (Maybe a)
 former <::> latter = former >>= \case
-    Just (m, f) -> latter >>= \case
-            Just (m', x) -> return $ Just (m ++ m', f)
+    Just f -> latter >>= \case
+            Just x -> return $ Just f
             Nothing -> return Nothing
     Nothing -> return Nothing
 
-parseSequence:: State [PosToken] (Maybe ([Message], a)) -> State [PosToken] (Maybe ([Message], [a]))
+parseSequence:: Parser (Maybe a) -> Parser [a]
 parseSequence p = p >>= \case
-    Just (m, x') -> parseSequence p >>= \case
-        Just (m', s') -> return $ Just (m ++ m', x':s')
-        Nothing -> return Nothing
-    Nothing -> return $ Just ([], [])
+    Just x' -> parseSequence p >>= return . (x':)
+    Nothing -> return $ []
 
-parseCommaSeparated:: State [PosToken] (Maybe ([Message], a)) -> State [PosToken] (Maybe ([Message], [a]))
+parseCommaSeparated:: Parser (Maybe a) -> Parser [a]
 parseCommaSeparated = parseSeparated $ parseToken Comma
 
 -- parser parts
 data VarDecSet = VarDecSet [PosStr] Expr deriving (Show)
-parseVarDecSet:: OpeMap -> State [PosToken] (Maybe ([Message], VarDecSet))
-parseVarDecSet omap = makeParser VarDecSet <++> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
+parseVarDecSet:: OpeMap -> Parser (Maybe VarDecSet)
+parseVarDecSet omap = return (Just VarDecSet) <&&> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
 -- [proof] = [command] [expr] [command] [expr]
 
@@ -240,6 +261,12 @@ parseVarDecSet omap = makeParser VarDecSet <++> parseCommaSeparated parseIdent <
 -- fork [proof]
 -- fork [proof]
 
+
+-- return x >>= f  == f x
+-- m >>= return    == m
+-- (m >>= f) >>= g == m >>= (\x -> f x >>= g)
+
+    
 data Command = StepCmd | ImplCmd | WrongCmd String deriving (Show)
 data Statement = SingleStm Command Expr
     | BlockStm [Statement]
@@ -248,40 +275,38 @@ data Statement = SingleStm Command Expr
 
 makeParser f = return $ Just ([], f)
 
-parseMultiLineStm:: OpeMap -> State [PosToken] (Maybe ([Message], Statement))
-parseMultiLineStm omap = makeParser BlockStm <++> parseSequence (parseStatement omap)
+parseMultiLineStm:: OpeMap -> Parser (Maybe Statement)
+parseMultiLineStm omap = return (Just BlockStm) <&&> parseSequence (parseStatement omap)
 
-parseStatement:: OpeMap -> State [PosToken] (Maybe ([Message], Statement))
+parseStatement:: OpeMap -> Parser (Maybe Statement)
 parseStatement omap = parseSymbol "{" >>= \case 
     Just{} -> parseBlock
     Nothing -> parseSingleStm
     where
     parseCmd = parseIdent >>= \case
-        Just (_, (_, "step")) -> return $ Just StepCmd
-        Just (_, (_, "impl")) -> return $ Just ImplCmd
-        Just (_, (_, s)) -> return $ Just $ WrongCmd s
-    parseBlock = makeParser BlockStm <++> parseSequence (parseStatement omap) <::> parseSymbol "}"
+        Just (_, "step") -> return $ Just StepCmd
+        Just (_, "impl") -> return $ Just ImplCmd
+        Just (_, s) -> return $ Just $ WrongCmd s
+    parseBlock = return (Just BlockStm) <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
     parseSingleStm = parseCmd >>= \case
         Just cmd -> parseIdent >>= \case
-            Just (_, (_, "assume")) -> makeParser (AssumeStm cmd)
+            Just (_, "assume") -> return (Just $ AssumeStm cmd)
                 <++> parseExpr omap <::> parseSymbol "{"
                 <::> parseToken (Ident "begin") <++> parseExpr omap 
                 <++> parseMultiLineStm omap <::> parseSymbol "}"
-            _ -> makeParser (SingleStm cmd) <++> parseExpr omap
+            _ -> return (Just $ SingleStm cmd) <++> parseExpr omap
         Nothing -> return Nothing
 
 type VarDec = [(PosStr, Expr)]
-parseVarDecs:: OpeMap -> State [PosToken] (Maybe ([Message], VarDec))
-parseVarDecs omap = parse >>= \case
-    Just (m, x) -> return $ Just (m, conv x)
-    Nothing -> return $ Just ([], [])
+parseVarDecs:: OpeMap -> Parser (Maybe VarDec)
+parseVarDecs omap = fmap (Just . conv) parse
     where
-    parse:: State [PosToken] (Maybe ([Message], [VarDecSet]))
+    parse:: Parser [VarDecSet]
     parse = parseCommaSeparated $ parseVarDecSet omap
     conv:: [VarDecSet] -> VarDec
     conv = concatMap (uncurry zip) . (map toTuple)
     toTuple (VarDecSet ns t) = (ns, repeat t)
-parseParenVarDecs omap = makeParser id <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
+parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 
 -- declaration parsers
 data Decla = Axiom VarDec Expr | Theorem VarDec Expr Statement
@@ -289,53 +314,53 @@ data Decla = Axiom VarDec Expr | Theorem VarDec Expr Statement
     | DataType PosStr Expr | Undef PosStr Expr
     | InfixDecla Bool Int Int PosStr deriving (Show)
 
-parseDeclaBody:: OpeMap -> String -> State [PosToken] (Maybe ([Message], Decla))
-parseDeclaBody omap "axiom" = makeParser Axiom
+parseDeclaBody:: OpeMap -> String -> Parser (Maybe Decla)
+parseDeclaBody omap "axiom" = return (Just Axiom)
     <++> parseParenVarDecs omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "theorem" = makeParser Theorem
+parseDeclaBody omap "theorem" = return (Just Theorem)
     <++> parseParenVarDecs omap
     <::> parseSymbol "{" 
     <++> parseExpr omap
     <::> parseToken (Ident "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap
     <::> parseSymbol "}"
-parseDeclaBody omap "define" = makeParser Define
+parseDeclaBody omap "define" = return (Just Define)
     <++> parseIdent
     <++> parseParenVarDecs omap
     <::> parseSymbol ":" <++> parseExpr omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "predicate" = makeParser Predicate
+parseDeclaBody omap "predicate" = return (Just Predicate)
     <++> parseIdent
     <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap<::> parseSymbol "]"
     <++> parseParenVarDecs omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "data" = makeParser DataType
+parseDeclaBody omap "data" = return (Just DataType)
     <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
-parseDeclaBody omap "undef" = makeParser Undef
+parseDeclaBody omap "undef" = return (Just Undef)
     <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap
-parseDeclaBody omap "infixl" = makeParser (InfixDecla True 2)
+parseDeclaBody omap "infixl" = return (Just (InfixDecla True 2))
     <++> parseNumber <++> parseAnyOperator
-parseDeclaBody omap "infixr" = makeParser (InfixDecla False 2)
+parseDeclaBody omap "infixr" = return (Just (InfixDecla False 2))
     <++> parseNumber <++> parseAnyOperator 
-parseDeclaBody omap "unaryl" = makeParser (InfixDecla True 1)
+parseDeclaBody omap "unaryl" = return (Just (InfixDecla True 1))
     <++> parseNumber <++> parseAnyOperator
-parseDeclaBody omap "unaryr" = makeParser (InfixDecla False 1)
+parseDeclaBody omap "unaryr" = return (Just (InfixDecla False 1))
     <++> parseNumber <++> parseAnyOperator
 parseDeclaBody _ _ = return Nothing
 
-parseDecla:: OpeMap -> State [PosToken] (Maybe ([Message], Decla))
+parseDecla:: OpeMap -> Parser (Maybe Decla)
 parseDecla omap = parseIdent >>= \case
-    Just (msgs, (_, x))-> parseDeclaBody omap x
+    Just (_, x)-> parseDeclaBody omap x
     Nothing -> return Nothing
 
 -- main parser
-parseProgram:: State [PosToken] ([Decla], OpeMap)
+parseProgram:: Parser ([Decla], OpeMap)
 parseProgram = parseProgram' buildInOpe where
     buildInOpe = M.fromList [(">>=", (2, 0, True)), ("->", (2, 1, True)), ("|", (2, 2, True))]
-    parseRest:: Decla -> OpeMap -> State [PosToken] ([Decla], OpeMap)
+    parseRest:: Decla -> OpeMap -> Parser ([Decla], OpeMap)
     parseRest x omap = parseProgram' omap >>= \(xs, omap')-> return (x:xs, omap')
-    parseProgram':: OpeMap -> State [PosToken] ([Decla], OpeMap)
+    parseProgram':: OpeMap -> Parser ([Decla], OpeMap)
     parseProgram' omap = parseDecla omap >>= \case
-        Just (m, x@(InfixDecla leftAssoc narg pre (_, s))) -> parseRest x $ M.insert s (narg, pre, leftAssoc) omap
-        Just (m, x) -> parseRest x omap
+        Just x@(InfixDecla leftAssoc narg pre (_, s)) -> parseRest x $ M.insert s (narg, pre, leftAssoc) omap
+        Just x -> parseRest x omap
         Nothing -> return ([], omap)

@@ -192,5 +192,5 @@ loadDecla _ ctx = return ctx
 buildProgram::String -> Writer [Message] Context
 buildProgram prg = loadDeclas declas $ newContext omap where
     tokens = tokenize prg
-    ((declas, omap), rest) = runState parseProgram tokens
+    (msg, rest, (declas, omap)) = runParser parseProgram tokens
     loadDeclas xs ctx = foldM (flip loadDecla) ctx xs

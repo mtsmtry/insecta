@@ -76,6 +76,19 @@ axiom (A: Prop) {
 #	A | (B | C) = (A | B) | C
 #}
 
+
+axiom (A: Prop, B: Prop) {
+	A -> B >>= ~A | B 
+}
+
+axiom (A: Prop, B: Prop, C: Prop) {
+	A & (B | C) >>= A & B | A & C
+}
+
+axiom (A: Prop, B: Prop, C: Prop) {
+	(A | B) & C >>= A & C | B & C
+}
+
 axiom (A: Prop) {
 	A & True >>= A
 }

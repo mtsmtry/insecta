@@ -11,10 +11,10 @@ import Rewriter
 import Analyzer
 
 tokenizeTest line = intercalate "," $ map show $ tokenize line
-parserTest x = show . runState x . tokenize
+parserTest x = show . runParser x . tokenize
 
 showMessages msgs = intercalate "\n" $ map show msgs
-parseExprs str omap = maybe [] snd (evalState (parseCommaSeparated $ parseExpr omap) $ tokenize str)
+parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ tokenize str)
 
 showContext (Context omap tmap smap (rsmap, rimap)) = toJsonFormatedWith (showExpr omap) tmap ++ "\n"
     ++ show omap ++ "\n"
