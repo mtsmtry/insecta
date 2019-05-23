@@ -10,11 +10,13 @@ import Library
 import Rewriter
 import Analyzer
 
-tokenizeTest line = intercalate "," $ map show $ tokenize line
-parserTest x = show . runParser x . tokenize
+lexer str = (\(_, _, _, x)-> x) $ runLexer tokenize (initialPosition, str)
+
+tokenizeTest line = intercalate "," $ map show $ lexer line
+parserTest x = show . runParser x . lexer
 
 showMessages msgs = intercalate "\n" $ map show msgs
-parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ tokenize str)
+parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str)
 
 showContext (Context omap tmap smap (rsmap, rimap)) = toJsonFormatedWith (showExpr omap) tmap ++ "\n"
     ++ show omap ++ "\n"

@@ -190,7 +190,9 @@ loadDecla (DataType (p, t) def) (Context omap tmap simp rset) = do
 loadDecla _ ctx = return ctx
 
 buildProgram::String -> Writer [Message] Context
-buildProgram prg = loadDeclas declas $ newContext omap where
-    tokens = tokenize prg
-    (msg, rest, (declas, omap)) = runParser parseProgram tokens
-    loadDeclas xs ctx = foldM (flip loadDecla) ctx xs
+buildProgram prg = do
+    let (msg, pos, rest, tokens) = runLexer tokenize (initialPosition, prg)
+    let (msg', rest', (declas, omap)) = runParser parseProgram tokens
+    let loadDeclas xs ctx = foldM (flip loadDecla) ctx xs
+    writer (msg ++ msg', []) 
+    loadDeclas declas $ newContext omap

@@ -12,7 +12,27 @@ import Control.Arrow
 import Control.Applicative
 import Library
 
+newtype Lexer a = Lexer { runLexer::(Position, String) -> ([Message], Position, String, a) }
+
+instance Functor Lexer where
+    fmap f (Lexer g) = Lexer $ \ts -> let (m, p, ts', x) = g ts in (m, p, ts', f x)
+
+instance Applicative Lexer where
+    pure = return
+    a <*> b = do
+        f <- a
+        f <$> b
+
+instance Monad Lexer where
+    return x = Lexer $ \(t, s) -> ([], t, s, x)
+    (Lexer h) >>= f = Lexer $ \ts ->
+        let (m, p, ts', x) = h ts
+            (Lexer g) = f x
+            (m', p', ts'', x') = g (p, ts')
+        in  (m ++ m', p', ts'', x')
+
 newtype Parser a = Parser { runParser::[PosToken] -> ([Message], [PosToken], a) }
+
 
 instance Functor Parser where
     fmap f (Parser g) = Parser $ \ts -> let (m, ts', x) = g ts in (m, ts', f x)
@@ -33,8 +53,8 @@ instance Monad Parser where
 
 -- Position(Line, Char)
 data Position = Position Int Int | NonePosition deriving (Show)
-
 initialPosition = Position 1 1
+
 addChar (Position l c) n = Position l (c+n)
 nextChar (Position l c) = Position l (c+1)
 nextLine (Position l c) = Position (l+1) 1
@@ -69,28 +89,27 @@ makePosStr s = (NonePosition, s)
 data Message = Message PosStr String deriving (Show)
 
 -- Pop token from string 
--- (current position, input string) -> (poped token, rest string, new position)
-popToken:: Position -> String -> (Maybe PosToken, String, Position)
-popToken p [] = (Nothing, [], p)
-popToken p (x:xs)
-    | isDigit x = make (Number . read) isDigit
-    | isIdentHead x = make Ident isIdentBody
-    | isOperator x = make Operator isOperator
-    | isSymbol x = (Just $ PosToken p $ toSymbol [x], xs, nextChar p)
-    | x == '"' = make' Literal ('"' /=)
-    | x == '#' = let (t, rest) = span ('\n' /=) xs in (Nothing, rest, addChar p $ length t) 
-    | x == '\'' = make' toChar ('\'' /=)
-    | x == '\n' = (Nothing, xs, nextLine p)
-    | isSpace x = (Nothing, xs, nextChar p)
-    | otherwise = (Just $ PosToken p $ Error [x] "wrong", xs, nextChar p) 
+popToken:: Lexer (Maybe PosToken)
+popToken = Lexer $ \(p, all) -> case all of 
+    [] -> ([], p, [], Nothing)
+    (x:xs)
+        | isDigit x -> make (Number . read) isDigit
+        | isIdentHead x -> make Ident isIdentBody
+        | isOperator x -> make Operator isOperator
+        | isSymbol x -> ([], nextChar p, xs, Just $ PosToken p $ toSymbol [x])
+        | x == '"' -> make' Literal ('"' /=)
+        | x == '#' -> let (t, rest) = span ('\n' /=) xs in ([], addChar p $ length t, rest, Nothing) 
+        | x == '\'' -> make' toChar ('\'' /=)
+        | x == '\n' -> ([], nextLine p, xs, Nothing)
+        | isSpace x -> ([], nextChar p, xs, Nothing)
+        | otherwise -> ([Message (p, [x]) "wrong"], nextChar p, xs, Nothing)
+        where
+        -- (token constructor, tail condition) -> (messages, position, rest string, token)
+        make f g = ([], addChar p $ length t, rest, (Just . (PosToken p) . f . (x:)) t) where (t, rest) = span g xs
+        make' f g = ([], addChar p $ length t, drop 1 rest, (PosToken p) <$> (h t)) where 
+            (t, rest) = span g xs
+            h all = Just $ case all of [] -> Error all "no"; _ -> f all
     where
-    appPos:: Token -> PosToken
-    appPos = PosToken p
-    -- (token constructor, tail condition) -> (token, rest string, position)
-    make f g = ((Just . appPos . f . (x:)) t, rest, addChar p $ length t) where (t, rest) = span g xs
-    make' f g = (appPos <$> (h t), drop 1 rest, addChar p $ length t) where 
-        (t, rest) = span g xs
-        h all = Just $ case all of [] -> Error all "no"; _ -> f all
     -- Char -> Bool
     [isIdentSymbol, isOperator, isSymbol] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&%", "(){}[],:"]
     [isIdentHead, isIdentBody] = map any [[isLetter, ('_' ==)], [isLetter, isDigit, isIdentSymbol]]
@@ -100,11 +119,11 @@ popToken p (x:xs)
     toSymbol all = case all of "(" -> ParenOpen; ")" -> ParenClose; "," -> Comma; _ -> Symbol all
 
 -- string to tokens
-tokenize:: String -> [PosToken]
-tokenize = tokenize' initialPosition where
-    tokenize' :: Position -> String -> [PosToken]
-    tokenize' p [] = []
-    tokenize' p all = let (x, xs, p') = popToken p all in maybe id (:) x (tokenize' p' xs)
+tokenize:: Lexer [PosToken]
+tokenize = do
+    token <- popToken
+    rest <- tokenize
+    return $ maybe rest (:rest) token
 
 -- Term rewriting rule
 -- (before expression, after expression)
