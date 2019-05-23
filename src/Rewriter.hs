@@ -4,6 +4,7 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map as M
+import Control.Monad
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
@@ -12,6 +13,35 @@ import Parser
 import Library
 
 type TypeMap = M.Map String Expr
+data Context = Context { ctxOMap::OpeMap, ctxTMap::TypeMap, ctxSimps::Simplicity, ctxSRule::RuleMap, ctxIRule::RuleMap }
+newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
+
+instance Functor Analyzer where
+    fmap f (Analyzer g) = Analyzer $ \ctx -> let (msg, ctx', x) = g ctx in (msg, ctx', f x)
+
+instance Applicative Analyzer where
+    pure = return
+    a <*> b = a >>= (<$> b)
+
+instance Monad Analyzer where
+    return x = Analyzer $ \ctx -> ([], ctx, x)
+    (Analyzer h) >>= f = Analyzer $ \ts ->
+        let (msg, ctx, x) = h ts
+            (Analyzer g) = f x
+            (msg', ctx', x') = g ctx'
+        in  (msg ++ msg', ctx', x')
+
+analyzeErrorM:: Message -> Analyzer (Maybe a)
+analyzeErrorM msg = Analyzer $ \ctx -> ([msg], ctx, Nothing)
+analyzeErrorB:: Message -> Analyzer Bool
+analyzeErrorB msg = Analyzer $ \ctx -> ([msg], ctx, False)
+analyzeError:: Message -> Analyzer ()
+analyzeError msg = Analyzer $ \ctx -> ([msg], ctx, ())
+
+getContext:: Analyzer Context
+getContext = Analyzer $ \ctx -> ([], ctx, ctx)
+updateContext:: (Context -> a) -> (a -> a) -> Analyzer ()
+updateContext selector f = Analyzer $ \ctx-> ([], ctx, ()) -- Analyzer $ \ctx -> ([], selector ctx, ())
 
 unify:: TypeMap -> Expr -> Expr -> Maybe AssignMap
 unify tmap p t = if b then Just m else Nothing where
@@ -50,19 +80,25 @@ equals _ _ = False
 -- functions order by simplicity
 type Simplicity = [String]
 
-addSimp:: Simplicity -> Expr -> Expr -> Writer [Message] Simplicity
-addSimp m (FuncExpr (_, a) _) (FuncExpr pb@(p, b) _) = case (elemIndex a m, elemIndex b m) of
-    (Just a', Just b') -> if a' > b' then writer (m, [Message pb "Not as simple as the left side"]) else return m
-    (Just a', Nothing) -> return $ insertAt b a' m
-    (Nothing, Just b') -> return $ insertAt a (b'+1) m
-    (Nothing, Nothing) -> return $ b:a:m
+addSimp:: Expr -> Expr -> Analyzer ()
+addSimp (FuncExpr (_, a) _) (FuncExpr pb@(p, b) _) = do
+    m <- fmap ctxSimps getContext
+    case (elemIndex a m, elemIndex b m) of
+        (Just a', Just b') -> when (a' > b') $ analyzeError $ Message pb "Not as simple as the left side"
+        (Just a', Nothing) -> updateContext ctxSimps $ insertAt b a'
+        (Nothing, Just b') -> updateContext ctxSimps $ insertAt a (b'+1)
+        (Nothing, Nothing) -> updateContext ctxSimps $ (\m-> b:a:m)
     where
     insertAt:: a -> Int -> [a] -> [a]
     insertAt x 0 as = x:as
     insertAt x i (a:as) = a:insertAt x (i - 1) as
-addSimp m _ (FuncExpr pb@(_, b) _) = writer (b:m, [Message pb "You can not use constants on the left side"])
-addSimp m (FuncExpr (_, a) _) _ = return $ if a `elem` m then m else a:m
-addSimp m a _ = writer (m, [Message (getPosAndStr a) "Constants always have the same simplicity"]) 
+addSimp _ (FuncExpr pb@(_, b) _) = do 
+    updateContext ctxSimps $ (\m-> b:m)
+    analyzeError $ Message pb "You can not use constants on the left side"
+addSimp (FuncExpr (_, a) _) _ = do 
+    m <- fmap ctxSimps getContext
+    if a `elem` m then return () else updateContext ctxSimps (a:)
+addSimp a _ = analyzeError $ Message (getPosAndStr a) "Constants always have the same simplicity"
 
 -- どれか一つの引数に効果を適用し、同じ順番で引数を返す
 -- 適用できる引数がなかったときはNothingを返す

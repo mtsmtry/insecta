@@ -95,16 +95,25 @@ popToken = Lexer $ \(p, all) -> case all of
         where
         -- (token constructor, tail condition) -> (messages, position, rest string, token)
         make f g = ([], stepChar p $ length t, rest, (Just . (PosToken p) . f . (x:)) t) where (t, rest) = span g xs
-        make' f g = ([], stepChar p $ length t, drop 1 rest, (PosToken p) <$> (h t)) where 
+        make' f g = case all of 
+            [] -> ([Message (p, [x]) "error"], pos, drop 1 rest, Nothing)
+            _ -> ([], pos, drop 1 rest, Just $ PosToken p (f all)) 
+            where 
+            pos = stepChar p $ length t
             (t, rest) = span g xs
-            h all = Just $ case all of [] -> Error all "no"; _ -> f all
+        make'' f g = case all of
+            [] -> ([Message (p, [x]) "error"], pos, drop 1 rest, Nothing)
+            (x:xs) -> ([Message (p, [x]) "error"], pos, drop 1 rest, Nothing)
+            where
+            pos = stepChar p $ length t
+            (t, rest) = span g xs
     where
     -- Char -> Bool
     [isIdentSymbol, isOperator, isSymbol] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&%", "(){}[],:"]
     [isIdentHead, isIdentBody] = map any [[isLetter, ('_' ==)], [isLetter, isDigit, isIdentSymbol]]
         where any = F.foldr ((<*>) . (<$>) (||)) $ const False
     -- String -> Token
-    toChar all = case all of [x] -> LiteralOne x; [] -> Error all "too short"; (x:xs) -> Error all "too long"
+    toChar all = case all of [x] -> LiteralOne x; 
     toSymbol all = case all of "(" -> ParenOpen; ")" -> ParenClose; "," -> Comma; _ -> Symbol all
 
 -- string to tokens
