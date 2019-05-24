@@ -9,6 +9,7 @@ import Parser
 import Library
 import Rewriter
 import Analyzer
+import Data
 
 lexer str = (\(_, _, _, x)-> x) $ runLexer tokenize (initialPosition, str)
 parser p t = (\(_, _, x)-> x) $ runParser p t
@@ -19,26 +20,26 @@ parserTest x = show . parser x . lexer
 showMessages msgs = intercalate "\n" $ map show msgs
 parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str)
 
-showContext (Context omap tmap smap (rsmap, rimap)) = toJsonFormatedWith (showExpr omap) tmap ++ "\n"
-    ++ show omap ++ "\n"
-    ++ toJsonFormatedWith (showr " >>= ") rsmap ++ "\n"
-    ++ toJsonFormatedWith (showr " -> ") rimap ++ "\n"
-    ++ show smap
+showContext ctx = toJsonFormatedWith (showExpr (ctxOMap ctx)) (ctxTMap ctx) ++ "\n"
+    ++ show (ctxOMap ctx) ++ "\n"
+    ++ toJsonFormatedWith (showr " >>= ") (ctxSRule ctx) ++ "\n"
+    ++ toJsonFormatedWith (showr " -> ") (ctxIRule ctx) ++ "\n"
+    ++ show (ctxSimps ctx)
     where
     showr s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
-    showRule s (a, b) = showExpr omap a ++ s ++ showExpr omap b
+    showRule s (a, b) = showExpr (ctxOMap ctx) a ++ s ++ showExpr (ctxOMap ctx) b
 
 reasoningTest:: String -> String -> String
 reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ out where
-    (ctx@(Context omap tmap smap (rsmap, rimap)), msg) = runWriter $ buildProgram prg
-    exprs = parseExprs str omap
+    (msg, ctx) = buildProgram prg
+    exprs = parseExprs str (ctxOMap ctx)
     out = case exprs of
         [a, b] -> intercalate "\n" steps where
-            expr = derivate rimap tmap (a, b)
-            steps = maybe [] (showSteps omap) expr
+            expr = derivate (ctxIRule ctx) (ctxTMap ctx) (a, b)
+            steps = maybe [] (showSteps (ctxOMap ctx)) expr
         [input] -> intercalate "\n" steps where
-            expr = simplify smap tmap rsmap input
-            steps = showSteps omap expr
+            expr = simplify (ctxSimps ctx) (ctxTMap ctx) (ctxSRule ctx) input
+            steps = showSteps (ctxOMap ctx) expr
         _ -> "parse error"
 
 unifyTest:: String -> String

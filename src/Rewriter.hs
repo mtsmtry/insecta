@@ -9,27 +9,8 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
-import Parser
 import Library
-
-type TypeMap = M.Map String Expr
-data Context = Context { ctxOMap::OpeMap, ctxTMap::TypeMap, ctxSimps::Simplicity, ctxSRule::RuleMap, ctxIRule::RuleMap }
-newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
-
-instance Functor Analyzer where
-    fmap f (Analyzer g) = Analyzer $ \ctx -> let (msg, ctx', x) = g ctx in (msg, ctx', f x)
-
-instance Applicative Analyzer where
-    pure = return
-    a <*> b = a >>= (<$> b)
-
-instance Monad Analyzer where
-    return x = Analyzer $ \ctx -> ([], ctx, x)
-    (Analyzer h) >>= f = Analyzer $ \ts ->
-        let (msg, ctx, x) = h ts
-            (Analyzer g) = f x
-            (msg', ctx', x') = g ctx'
-        in  (msg ++ msg', ctx', x')
+import Data
 
 analyzeErrorM:: Message -> Analyzer (Maybe a)
 analyzeErrorM msg = Analyzer $ \ctx -> ([msg], ctx, Nothing)
@@ -37,11 +18,6 @@ analyzeErrorB:: Message -> Analyzer Bool
 analyzeErrorB msg = Analyzer $ \ctx -> ([msg], ctx, False)
 analyzeError:: Message -> Analyzer ()
 analyzeError msg = Analyzer $ \ctx -> ([msg], ctx, ())
-
-getContext:: Analyzer Context
-getContext = Analyzer $ \ctx -> ([], ctx, ctx)
-updateContext:: (Context -> a) -> (a -> a) -> Analyzer ()
-updateContext selector f = Analyzer $ \ctx-> ([], ctx, ()) -- Analyzer $ \ctx -> ([], selector ctx, ())
 
 unify:: TypeMap -> Expr -> Expr -> Maybe AssignMap
 unify tmap p t = if b then Just m else Nothing where
@@ -77,27 +53,24 @@ equals Rewrite{} _ = error "Can not use Rewrite"
 equals _ Rewrite{} = error "Can not use Rewrite"
 equals _ _ = False
 
--- functions order by simplicity
-type Simplicity = [String]
-
 addSimp:: Expr -> Expr -> Analyzer ()
 addSimp (FuncExpr (_, a) _) (FuncExpr pb@(p, b) _) = do
     m <- fmap ctxSimps getContext
     case (elemIndex a m, elemIndex b m) of
         (Just a', Just b') -> when (a' > b') $ analyzeError $ Message pb "Not as simple as the left side"
-        (Just a', Nothing) -> updateContext ctxSimps $ insertAt b a'
-        (Nothing, Just b') -> updateContext ctxSimps $ insertAt a (b'+1)
-        (Nothing, Nothing) -> updateContext ctxSimps $ (\m-> b:a:m)
+        (Just a', Nothing) -> updateSimp $ insertAt b a'
+        (Nothing, Just b') -> updateSimp $ insertAt a (b'+1)
+        (Nothing, Nothing) -> updateSimp $ (\m-> b:a:m)
     where
     insertAt:: a -> Int -> [a] -> [a]
     insertAt x 0 as = x:as
     insertAt x i (a:as) = a:insertAt x (i - 1) as
 addSimp _ (FuncExpr pb@(_, b) _) = do 
-    updateContext ctxSimps $ (\m-> b:m)
+    updateSimp $ (\m-> b:m)
     analyzeError $ Message pb "You can not use constants on the left side"
 addSimp (FuncExpr (_, a) _) _ = do 
     m <- fmap ctxSimps getContext
-    if a `elem` m then return () else updateContext ctxSimps (a:)
+    if a `elem` m then return () else updateSimp (a:)
 addSimp a _ = analyzeError $ Message (getPosAndStr a) "Constants always have the same simplicity"
 
 -- どれか一つの引数に効果を適用し、同じ順番で引数を返す
@@ -107,8 +80,6 @@ applyArgs f xs = applyArgs' xs [] where
     applyArgs':: [Expr] -> [Expr] -> Maybe [Expr]
     applyArgs' [] _ = Nothing
     applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
-
-type RuleMap = M.Map String [Rule]
 
 simplify:: Simplicity -> TypeMap -> RuleMap -> Expr -> Expr
 simplify smap tmap m e = maybe e (simplify smap tmap m) $ step m e where

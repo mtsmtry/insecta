@@ -14,15 +14,16 @@ unaryr 6 ~
 infixl 5 &
 infixl 4 |
 infixl 3 =
+infixl 2 =>
 infixl 2 ->
-infixl 1 <->
+infixl 1 <=>
 
 data N = O | S(N)
 undef R: Type
 
 undef operator +: (N, N)->N
 undef operator *: (N, N)->N
-undef operator ->: (Prop, Prop)->Prop
+undef operator =>: (Prop, Prop)->Prop
 undef operator &: (Prop, Prop)->Prop
 undef operator |: (Prop, Prop)->Prop
 undef operator ~: Prop->Prop
@@ -42,7 +43,7 @@ axiom (a: N) {
 }
 
 axiom (A: Prop, B: Prop) {
-    A & B -> A
+    A & B => A
 }
 
 undef True: Prop
@@ -78,7 +79,7 @@ axiom (A: Prop) {
 
 
 axiom (A: Prop, B: Prop) {
-	A -> B >>= ~A | B 
+	A => B >>= ~A | B 
 }
 
 axiom (A: Prop, B: Prop, C: Prop) {
