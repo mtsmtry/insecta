@@ -202,6 +202,7 @@ parseStatement omap = parseSymbol "{" >>= \case
         Just (_, "step") -> return $ Just StepCmd
         Just (_, "impl") -> return $ Just ImplCmd
         Just (_, s) -> return $ Just $ WrongCmd s
+        Nothing -> return Nothing
     parseBlock = return (Just BlockStm) <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
     parseSingleStm = parseCmd >>= \case
         Just cmd -> parseIdent >>= \case

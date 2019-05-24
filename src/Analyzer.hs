@@ -53,18 +53,17 @@ extractExprsFromTuple (FuncExpr (_, "tuple") xs) = xs
 extractExprsFromTuple x = [x]
 
 checkType:: Expr -> Expr -> Analyzer Bool
-checkType a t = do
-    atexpr <- evalType a
+checkType t value = do
+    atexpr <- evalType value
     omap <- fmap ctxOMap getContext
     case atexpr of
         Just at -> if equals t at
             then return True 
-            else analyzeErrorB $ Message (showCodeExpr omap a) $
+            else analyzeErrorB $ Message (showCodeExpr omap value) $
                 "Couldn't match expected type '" ++ showExpr omap at ++
                 "' with actual type '" ++ showExpr omap t ++ "'"
         Nothing -> return False
 
--- (scope, expression) -> type
 evalType:: Expr -> Analyzer (Maybe Expr)
 evalType NumberExpr{} = return $ Just $ makeIdentExpr "N"
 evalType StringExpr{} = return $ Just $ makeIdentExpr "Char"
@@ -74,11 +73,8 @@ evalType (IdentExpr ph@(_, h)) = do
         Just t -> return $ Just t
         Nothing -> analyzeErrorM $ Message ph "Not defined"
 evalType (FuncExpr (_, "->") [arg, ret]) = do
-    case arg of
-        (FuncExpr (_, "tuple") as) -> forM_ as $ \a-> checkType a typeType
-        (FuncExpr ps _) -> analyzeError $ Message ps "Neither tuple of types or a type"
-        e -> void $ checkType e typeType
-    checkType ret typeType
+    forM_ (extractExprsFromTuple arg) $ checkType typeType
+    checkType typeType ret
     return $ Just typeType
 evalType (FuncExpr ph@(p, h) as) = do
     texpr <- fmap (M.lookup h . ctxTMap) getContext
@@ -90,16 +86,16 @@ evalType (FuncExpr ph@(p, h) as) = do
     evalFuncRetType:: Expr -> Analyzer (Maybe Expr)
     evalFuncRetType = \case
         FuncExpr (_, "->") [arg, ret] -> do
-            successful <- checkArgs as (extractExprsFromTuple arg)
+            successful <- checkArgs (extractExprsFromTuple arg) as
             return (if successful then Just ret else Nothing)
         _ -> analyzeErrorM $ Message ph "Not function"
     -- (argument values, argument types) -> is successful
     checkArgs:: [Expr] -> [Expr] -> Analyzer Bool
     checkArgs [] [] = return True
-    checkArgs [] _ = analyzeErrorB $ Message ph "Too few arguments"
-    checkArgs (a:as) (t:ts) = do
-        res <- checkType a t
-        rest <- checkArgs as ts
+    checkArgs _ [] = analyzeErrorB $ Message ph "Too few arguments"
+    checkArgs (t:ts) (a:as) = do
+        res <- checkType t a
+        rest <- checkArgs ts as
         return $ res || rest
 
 -- (argument types, return type) -> function type
@@ -136,7 +132,7 @@ insertRule e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = insertRule' ki
                     let msg = "Left side type is '" ++ left ++ "', " ++ "but right side type is '" ++ right ++ "'"
                     analyzeError $ Message pk msg
             _-> return ()
-    insertRule' "=>"  = do 
+    insertRule' "=>" = do 
         et' <- evalType e
         case et' of
             Just et-> if isIdentOf "Prop" et 
@@ -150,7 +146,7 @@ insertRule e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = insertRule' ki
 insertRule e@(FuncExpr _ _) = do 
     ps <- onOpeMap showCodeExpr e
     analyzeError $ Message ps "This is not a function"
-    
+
 insertRule e = do
     ps <- onOpeMap showCodeExpr e
     analyzeError $ Message ps "This is not a function"
@@ -187,6 +183,7 @@ runStatement input = \case
         return $ Rewrite EqualReason begin (FuncExpr (NonePosition, "->") [ass, block])
     BlockStm stms -> runStms stms input where 
         runStms:: [Statement] -> Expr -> Analyzer Expr
+        runStms [] input = return input
         runStms (x:xs) input = do
             ntrg <- runStatement input x
             runStms xs ntrg
@@ -202,7 +199,14 @@ subScope subRountine = do
 loadDecla:: Decla -> Analyzer ()
 loadDecla (Theorem dec prop stm) = subScope $ do
     mapM_ (uncurry addIdent) dec
-    runStatement prop stm
+    case prop of
+        FuncExpr ps@(p, kind) [start, goal] -> case kind of 
+            "=>" -> do
+                res <- runStatement start stm
+                return ()
+        _ -> do
+            str <- onOpeMap showCodeExpr prop
+            analyzeError $ Message str "Neither '>>=' or '=>'"
     insertRule prop
 
 loadDecla (Axiom dec prop) = subScope $ do
@@ -222,7 +226,6 @@ loadDecla (DataType t@(_, i) def) = do
     where
     thisType = makeIdentExpr i
     cstrs = extractArgs "|" def
-    -- (constructers, scope) -> new scope
     addCstr:: [Expr] -> Analyzer ()
     addCstr [] = return ()
     addCstr (IdentExpr x:xs) = do

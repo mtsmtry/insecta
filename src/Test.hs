@@ -23,7 +23,7 @@ parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseEx
 showContext ctx = toJsonFormatedWith (showExpr (ctxOMap ctx)) (ctxTMap ctx) ++ "\n"
     ++ show (ctxOMap ctx) ++ "\n"
     ++ toJsonFormatedWith (showr " >>= ") (ctxSRule ctx) ++ "\n"
-    ++ toJsonFormatedWith (showr " -> ") (ctxIRule ctx) ++ "\n"
+    ++ toJsonFormatedWith (showr " => ") (ctxIRule ctx) ++ "\n"
     ++ show (ctxSimps ctx)
     where
     showr s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
@@ -34,12 +34,14 @@ reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ o
     (msg, ctx) = buildProgram prg
     exprs = parseExprs str (ctxOMap ctx)
     out = case exprs of
-        [a, b] -> intercalate "\n" steps where
-            expr = derivate (ctxIRule ctx) (ctxTMap ctx) (a, b)
-            steps = maybe [] (showSteps (ctxOMap ctx)) expr
-        [input] -> intercalate "\n" steps where
+        [a, b] -> showRewriteList (ctxOMap ctx) (toRewriteList (ctxOMap ctx) expr) where
+            mexpr = derivate (ctxIRule ctx) (ctxTMap ctx) (a, b)
+            expr = fromMaybe (NumberExpr NonePosition 0)  mexpr
+        [input] -> showLatestExpr (ctxOMap ctx) expr ++ "\n" 
+            ++ showExpr (ctxOMap ctx) expr ++ "\n" 
+            ++ showExprAsRewrites (ctxOMap ctx) expr ++ "\n" 
+            ++ showRewriteList (ctxOMap ctx) (toRewriteList (ctxOMap ctx) expr) where
             expr = simplify (ctxSimps ctx) (ctxTMap ctx) (ctxSRule ctx) input
-            steps = showSteps (ctxOMap ctx) expr
         _ -> "parse error"
 
 unifyTest:: String -> String

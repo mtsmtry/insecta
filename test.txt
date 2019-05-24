@@ -78,10 +78,6 @@ axiom (A: Prop) {
 #}
 
 
-axiom (A: Prop, B: Prop) {
-	A => B >>= ~A | B 
-}
-
 axiom (A: Prop, B: Prop, C: Prop) {
 	A & (B | C) >>= A & B | A & C
 }
@@ -98,17 +94,29 @@ axiom (A: Prop) {
 	A | True >>= True
 }
 
-theorim (A, B, P, Q: Prop) {
-	((A -> P) & (B -> Q)) -> ((A & B) -> (P & Q))
+axiom (A: Prop, B: Prop) {
+	A => B >>= ~A | B 
+}
+
+axiom (A: Prop, B: Prop) {
+	~(A & B) >>= ~A & ~B
+}
+
+axiom (A: Prop, B: Prop) {
+	~(A | B) >>= ~A | ~B
+}
+
+theorem (A, B, P, Q: Prop) {
+	((A => P) & (B => Q)) => ((A & B) => (P & Q))
 proof:
-	step (A -> P) & (B -> Q)
+	step (A => P) & (B => Q)
 	step (~A | P) & (~B | Q)
 	step ~A & ~B | ~A & Q | P & ~B | P & Q
 	impl ~A & ~B | ~A | P & ~B | P & Q
 	impl ~A & ~B | ~A | ~B | P & Q
 	step ~(A | B) | ~(A & B) | (P & Q)
-	step ((A | B) & (A & B)) -> P & Q
-	step (A & B & A | B & A & B) -> P & Q
-	step (A & B | A & B) -> P & Q
-	step (A & B) -> (P & Q)
+	step ((A | B) & (A & B)) => P & Q
+	step (A & B & A | B & A & B) => P & Q
+	step (A & B | A & B) => P & Q
+	step (A & B) => (P & Q)
 }

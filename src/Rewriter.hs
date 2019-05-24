@@ -13,11 +13,11 @@ import Library
 import Data
 
 analyzeErrorM:: Message -> Analyzer (Maybe a)
-analyzeErrorM msg = Analyzer $ \ctx -> ([msg], ctx, Nothing)
+analyzeErrorM msg = Analyzer ([msg], , Nothing)
 analyzeErrorB:: Message -> Analyzer Bool
-analyzeErrorB msg = Analyzer $ \ctx -> ([msg], ctx, False)
+analyzeErrorB msg = Analyzer ([msg], , False)
 analyzeError:: Message -> Analyzer ()
-analyzeError msg = Analyzer $ \ctx -> ([msg], ctx, ())
+analyzeError msg = Analyzer ([msg], , ())
 
 unify:: TypeMap -> Expr -> Expr -> Maybe AssignMap
 unify tmap p t = if b then Just m else Nothing where
@@ -82,33 +82,37 @@ applyArgs f xs = applyArgs' xs [] where
     applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
 
 simplify:: Simplicity -> TypeMap -> RuleMap -> Expr -> Expr
-simplify smap tmap m e = maybe e (simplify smap tmap m) $ step m e where
+simplify smap tmap m e = maybe e (simplify smap tmap m) $ step e where
     getSimp f = fromMaybe (-1) $ elemIndex f smap
 
-    step:: RuleMap -> Expr -> Maybe Expr
-    step m e = applyByHeadList m heads e where
+    step:: Expr -> Maybe Expr
+    step e = applyByHeadList heads e where
         simpCompare a b = a `compare` b
         heads = sortBy simpCompare $ lookupHeads e
 
     lookupHeads:: Expr -> [(String, Int)]
-    lookupHeads = lookupHeads' . getLatestExpr where
-        lookupHeads' (FuncExpr (_, f) as) = (f, getSimp f):concatMap lookupHeads' as
-        lookupHeads' _ = []
+    lookupHeads (Rewrite _ a _) = lookupHeads a
+    lookupHeads (FuncExpr (_, f) as) = (f, getSimp f):concatMap lookupHeads as
+    lookupHeads _ = []
 
     apply:: [Rule] -> Expr -> Maybe Expr
     apply (r@(a, b):rs) e = maybe (apply rs e) (\m-> Just $ Rewrite (StepReason r m) (assign m b) e) (unify tmap a e)
     apply [] e = Nothing
     
     applyAtSimp:: [Rule] -> Int -> Expr -> Maybe Expr
+    -- applyAtSimp rs s e@(Rewrite r a b) = case applyAtSimp rs s a of 
+    --    Just (Rewrite r' a' b') -> Just $ Rewrite r' a' e
+    --    Just e -> Just $ Rewrite r e b
+    --    Nothing -> Nothing
     applyAtSimp rs s (Rewrite r a b) = applyAtSimp rs s a >>= \x-> Just $ Rewrite r x b
     applyAtSimp rs s e@(FuncExpr h@(_, f) as) = 
         if s == getSimp f then apply rs e <|> e' else e' where
             e' = applyArgs (applyAtSimp rs s) as >>= Just . FuncExpr h
     applyAtSimp _ _ _ = Nothing
     
-    applyByHeadList:: RuleMap -> [(String, Int)] -> Expr -> Maybe Expr
-    applyByHeadList _ [] _ = Nothing
-    applyByHeadList m ((f, s):xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList m xs e
+    applyByHeadList:: [(String, Int)] -> Expr -> Maybe Expr
+    applyByHeadList [] _ = Nothing
+    applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList xs e
 
 -- [A, B, C, X, Y, Z] [P, Q, R, X, Y, Z] => [A, B, C, X, R, Q, P]
 -- marge (Z, (Y, (X, (C, (B, A))))) (Z, (Y, (X, (R, (Q, P)))))
@@ -197,42 +201,52 @@ getOldestExpr:: Expr -> Expr
 getOldestExpr (Rewrite _ _ b) = getOldestExpr b
 getOldestExpr e = e 
 
-showSteps:: OpeMap -> Expr -> [String]
-showSteps omap x = map show $ reverse $ showSteps' [(Nothing, x)] x where
-    show::(Maybe Reason, Expr) -> String
-    show (r, e) = showOldestExpr omap e ++ " " ++ maybe "" (\x-> "[" ++ showReason x ++ "]") r
+data RewriteList = RewriteExpr Expr | RewriteList Reason Expr RewriteList
 
-    showSteps':: [(Maybe Reason, Expr)] -> Expr -> [(Maybe Reason, Expr)]
-    showSteps' p e = maybe p (\x@(_, t)-> showSteps' (x:p) t) $ nextStep e
+showReason:: OpeMap -> Reason -> String
+showReason omap (StepReason (a, b) asg) = showExpr omap a ++ " >>= " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
+showReason omap (ImplReason (a, b) asg) = showExpr omap a ++ " -> " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
+showReason omap EqualReason = ""
 
-    showReason:: Reason -> String
-    showReason (StepReason (a, b) asg) = showExpr omap a ++ " >>= " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
-    showReason (ImplReason (a, b) asg) = showExpr omap a ++ " -> " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
-    showReason EqualReason = ""
+toRewriteList:: OpeMap -> Expr -> RewriteList
+toRewriteList omap (FuncExpr f as) = build args [] where
+    oldest (RewriteExpr e) = e
+    oldest (RewriteList _ e _) = e
+    args = map (toRewriteList omap) as
+    build:: [RewriteList] -> [Expr] -> RewriteList
+    build [] args = RewriteExpr $ FuncExpr f args
+    build (RewriteExpr e:sargs) args = build sargs (e:args)
+    build (RewriteList r old rest:sargs) args = RewriteList r (FuncExpr f (old:map oldest sargs ++ args)) (build (rest:sargs) args)
+toRewriteList omap (Rewrite r a b) = add r blist alist where
+    alist = toRewriteList omap a
+    blist = toRewriteList omap b
+    add:: Reason -> RewriteList -> RewriteList -> RewriteList
+    add ar (RewriteList r e rest) trg = add ar rest $ RewriteList r e trg
+    add ar (RewriteExpr e) trg = RewriteList ar e trg
+toRewriteList omap e = RewriteExpr e
 
-    nextStep:: Expr -> Maybe (Maybe Reason, Expr)
-    nextStep (Rewrite r a b) = Just $ fromMaybe (Just r, a) $ nextStep b
-    nextStep (FuncExpr h as) = applyArgs nextStep as >>= (\(r, as')-> Just (r, FuncExpr h as'))
-    nextStep _ = Nothing
-
-    applyArgs:: (Expr -> Maybe (Maybe Reason, Expr)) -> [Expr] -> Maybe (Maybe Reason, [Expr])
-    applyArgs f xs = applyArgs' xs [] where
-        applyArgs':: [Expr] -> [Expr] -> Maybe (Maybe Reason, [Expr])
-        applyArgs' [] _ = Nothing
-        applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\(r, e)-> Just (r, reverse (e:as') ++ as)) (f a)
+showRewriteList:: OpeMap -> RewriteList -> String
+showRewriteList omap (RewriteExpr e) = showOldestExpr omap e
+showRewriteList omap (RewriteList r e rest) = showOldestExpr omap e
+                                            ++ " [" ++ showReason omap r ++ "]" ++ "\n"
+                                            ++ showRewriteList omap rest
 
 showFuncExpr:: OpeMap -> (OpeMap -> Expr -> String) -> PosStr -> [Expr]-> String
 showFuncExpr omap fshow (_, "tuple") as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
 showFuncExpr omap fshow (_, f) as
-    | not (isAlpha (head f)) && length as == 2 = let [a, b] = as in bshow a ++ f ++ bshow b
-    | not (isAlpha (head f)) && length as == 1 = f ++ bshow (head as)
+    | not (isAlpha (head f)) && length as == 2 = let [a, b] = as; (former, latter) = (bshow a, bshow b) in case b of 
+        (FuncExpr (_, g) _)-> if isAlpha (head g) then former ++ f ++ latter else former ++ f ++ "(" ++ latter ++ ")"
+        _ -> former ++ f ++ latter
+    | not (isAlpha (head f)) && length as == 1 = let arg = bshow (head as) in case head as of
+        e@(FuncExpr (_, g) _) -> if isAlpha (head g) || head g == '(' then f ++ arg else f ++ "(" ++ arg ++ ")"
+        _ -> f ++ arg
     | otherwise = f ++ "(" ++ intercalate ", " (map (fshow omap) as) ++ ")" where
-        getPre h = maybe (-1) (\(_, x, _)-> x) $ M.lookup h omap
-        bshow e@(FuncExpr (_, g) as) = if getPre f > getPre g then "(" ++ fshow omap e ++ ")" else fshow omap e
+        getPre h = maybe 100 (\(_, x, _)-> x) $ M.lookup h omap
+        bshow e@(FuncExpr (_, g) as) = if length g == 2 && getPre f > getPre g then "(" ++ fshow omap e ++ ")" else fshow omap e
         bshow e = fshow omap e
 
 showExpr:: OpeMap -> Expr -> String
-showExpr omap (Rewrite _ a b) = "rewrite[" ++ showExpr omap a ++ ", " ++ showExpr omap b ++ "]"  -- error "Can not use Rewrite"
+showExpr omap (Rewrite _ a b) = "[" ++ showExpr omap a ++ ", " ++ showExpr omap b ++ "]"  -- error "Can not use Rewrite"
 showExpr omap (StringExpr (_, s)) = "\"" ++ s ++ "\"" 
 showExpr omap (IdentExpr (_, x)) = x
 showExpr omap (NumberExpr _ n) = show n
