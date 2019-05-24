@@ -211,7 +211,7 @@ showReason omap EqualReason = ""
 toRewriteList:: OpeMap -> Expr -> RewriteList
 toRewriteList omap (FuncExpr f as) = build args [] where
     oldest (RewriteExpr e) = e
-    oldest (RewriteList _ e _) = e
+    oldest (RewriteList _ _ rest) = oldest rest
     args = map (toRewriteList omap) as
     build:: [RewriteList] -> [Expr] -> RewriteList
     build [] args = RewriteExpr $ FuncExpr f args
