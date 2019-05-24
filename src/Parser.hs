@@ -126,7 +126,7 @@ parseAnyOperator = Parser $ \case
 parseNumber:: Parser (Maybe Int)
 parseNumber = Parser $ \case
     [] -> ([], [], Nothing)
-    all@((PosToken _ t):ts) -> case t of Number n-> ([], ts, Just n); _-> ([], all, Nothing)
+    all@(PosToken _ t:ts) -> case t of Number n-> ([], ts, Just n); _-> ([], all, Nothing)
 
 parseIdent:: Parser (Maybe PosStr)
 parseIdent = Parser $ \case
@@ -163,6 +163,14 @@ former <::> latter = former >>= \case
     Just f -> latter >>= \case
             Just x -> return $ Just f
             Nothing -> return Nothing
+    Nothing -> return Nothing
+
+infixl 1 <!!>
+(<!!>):: Parser (Maybe ((Maybe a)->b)) -> Parser (Maybe a) -> Parser (Maybe b)
+former <!!> latter = former >>= \case
+    Just f -> latter >>= \case
+            Just x -> return $ Just (f $ Just x)
+            Nothing -> return $ Just (f Nothing)
     Nothing -> return Nothing
 
 parseSequence:: Parser (Maybe a) -> Parser [a]
@@ -223,6 +231,9 @@ parseVarDecs omap = fmap (Just . conv) parse
     toTuple (VarDecSet ns t) = (ns, repeat t)
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 
+parseLatex:: OpeMap -> Parser (Maybe Expr)
+parseLatex omap = return (Just id) <::> parseToken (Ident "proof") <::> parseSymbol "(" <++> parseExpr omap <::> parseSymbol ")"
+
 parseDeclaBody:: OpeMap -> String -> Parser (Maybe Decla)
 parseDeclaBody omap "axiom" = return (Just Axiom)
     <++> parseParenVarDecs omap
@@ -246,7 +257,7 @@ parseDeclaBody omap "predicate" = return (Just Predicate)
 parseDeclaBody omap "data" = return (Just DataType)
     <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
 parseDeclaBody omap "undef" = return (Just Undef)
-    <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap
+    <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex omap
 parseDeclaBody omap "infixl" = return (Just (InfixDecla True 2))
     <++> parseNumber <++> parseAnyOperator
 parseDeclaBody omap "infixr" = return (Just (InfixDecla False 2))

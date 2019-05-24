@@ -82,6 +82,7 @@ nextLine (Position l c) = Position (l+1) 1
 type Rule = (Expr, Expr)
 type OpeMap = M.Map String (Int, Int, Bool) -- (argument number, preceed, is left associative)
 type AssignMap = M.Map String Expr
+type LatexMap = M.Map String Expr
 
 type VarDec = [(PosStr, Expr)]
 data VarDecSet = VarDecSet [PosStr] Expr deriving (Show)
@@ -101,7 +102,7 @@ data Decla = Axiom VarDec Expr
     | Define PosStr VarDec Expr Expr 
     | Predicate PosStr PosStr Expr VarDec Expr
     | DataType PosStr Expr 
-    | Undef PosStr Expr
+    | Undef PosStr Expr (Maybe Expr)
     | InfixDecla Bool Int Int PosStr deriving (Show)
 data Reason = StepReason Rule AssignMap 
     | ImplReason Rule AssignMap 
@@ -110,7 +111,7 @@ data Reason = StepReason Rule AssignMap
 type RuleMap = M.Map String [Rule]
 type Simplicity = [String] -- functions ordered by simplicity
 type TypeMap = M.Map String Expr
-data Context = Context { ctxOMap::OpeMap, ctxTMap::TypeMap, ctxSimps::Simplicity, ctxSRule::RuleMap, ctxIRule::RuleMap }
+data Context = Context { ctxOMap::OpeMap, ctxTMap::TypeMap, ctxSimps::Simplicity, ctxSRule::RuleMap, ctxIRule::RuleMap, ctxLatex::LatexMap }
 newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
 
 instance Functor Analyzer where
@@ -144,3 +145,4 @@ updateSRule f = Analyzer $ \ctx-> ([], ctx{ctxSRule=f $ ctxSRule ctx}, ())
 updateIRule f = Analyzer $ \ctx-> ([], ctx{ctxIRule=f $ ctxIRule ctx}, ())
 updateSimp f = Analyzer $ \ctx-> ([], ctx{ctxSimps=f $ ctxSimps ctx}, ())
 updateScope f = Analyzer $ \ctx-> ([], ctx{ctxTMap=f $ ctxTMap ctx}, ())
+updateLatex f = Analyzer $ \ctx-> ([], ctx{ctxTMap=f $ ctxLatex ctx}, ())

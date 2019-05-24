@@ -13,6 +13,7 @@ import Library
 import Parser
 import Rewriter
 import Data
+import Visualizer
 
 simplifyM:: Expr -> Analyzer Expr
 simplifyM e = do
@@ -27,7 +28,7 @@ derivateM e = do
     return $ derivate imap tmap e
 
 typeType = makeIdentExpr "Type"
-newContext omap = Context omap buildInScope [] M.empty M.empty where
+newContext omap = Context omap buildInScope [] M.empty M.empty M.empty where
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (, typeType) buildInTypes
 
@@ -183,10 +184,7 @@ runStatement input = \case
         return $ Rewrite EqualReason begin (FuncExpr (NonePosition, "->") [ass, block])
     BlockStm stms -> runStms stms input where 
         runStms:: [Statement] -> Expr -> Analyzer Expr
-        runStms [] input = return input
-        runStms (x:xs) input = do
-            ntrg <- runStatement input x
-            runStms xs ntrg
+        runStms xs input = foldM runStatement input xs
 
 subScope::Analyzer a -> Analyzer a
 subScope subRountine = do
@@ -213,7 +211,11 @@ loadDecla (Axiom dec prop) = subScope $ do
     mapM_ (uncurry addIdent) dec
     insertRule prop
 
-loadDecla (Undef t e) = addIdent t e
+loadDecla (Undef t@(_, s) e mtex) = do
+    addIdent t e
+    case mtex of 
+        Just tex -> updateLatex $ M.insert s tex
+        Nothing -> return ()
 
 loadDecla (Define t args ret def) = do
     subScope $ do

@@ -10,6 +10,7 @@ import Library
 import Rewriter
 import Analyzer
 import Data
+import Visualizer
 
 lexer str = (\(_, _, _, x)-> x) $ runLexer tokenize (initialPosition, str)
 parser p t = (\(_, _, x)-> x) $ runParser p t
