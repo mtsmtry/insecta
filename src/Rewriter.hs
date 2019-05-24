@@ -30,6 +30,24 @@ isCommutative (FuncExpr (_, f) [FuncExpr (_, g)[IdentExpr (_, a), IdentExpr (_, 
     all (==f) [g, h, i] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
 isCommutative _ = False
 
+unifyM:: Expr -> Expr -> Analyzer Maybe AssignMap
+unifyM p t = do
+    ctx <- getContext
+    return $ unify (ctxTMap ctx) p t
+
+convertType:: Expr -> Expr -> Analyzer Bool
+convertType value trgType = do
+    mt <- evalType value
+    case mt of
+        Just t -> if equas t trgType then return True else do
+            pmap <- fmap ctxPred getContext
+            pred <- M.lookup (showName trgType) pmap
+            masg <- unifyM pred value
+            case masg of
+                Just{} -> return True
+                Nothing -> return False
+        Nothing -> return False
+
 unify:: TypeMap -> Expr -> Expr -> Maybe AssignMap
 unify tmap p t = if b then Just m else Nothing where
     (b, m) = (runState $ unifym p t) M.empty

@@ -82,7 +82,6 @@ nextLine (Position l c) = Position (l+1) 1
 type Rule = (Expr, Expr)
 type OpeMap = M.Map String (Int, Int, Bool) -- (argument number, preceed, is left associative)
 type AssignMap = M.Map String Expr
-type LatexMap = M.Map String Expr
 
 type VarDec = [(PosStr, Expr)]
 data VarDecSet = VarDecSet [PosStr] Expr deriving (Show)
@@ -111,7 +110,9 @@ data Reason = StepReason Rule AssignMap
 type RuleMap = M.Map String [Rule]
 type Simplicity = [String] -- functions ordered by simplicity
 type TypeMap = M.Map String Expr
-data Context = Context { ctxOMap::OpeMap, ctxTMap::TypeMap, ctxSimps::Simplicity, ctxSRule::RuleMap, ctxIRule::RuleMap, ctxLatex::LatexMap }
+type LatexMap = M.Map String Expr
+type PredicateMap = M.Map String Expr
+data Context = Context { ctxOMap::OpeMap, ctxTMap::TypeMap, ctxSimps::Simplicity, ctxSRule::RuleMap, ctxIRule::RuleMap, ctxLatex::LatexMap, ctxPred::PredicateMap }
 newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
 
 instance Functor Analyzer where
