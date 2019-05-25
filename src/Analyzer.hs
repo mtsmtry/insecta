@@ -15,6 +15,40 @@ import Rewriter
 import Data
 import Visualizer
 
+evalType:: Expr -> Analyzer (Maybe Expr)
+evalType NumberExpr{} = return $ Just $ makeIdentExpr "N"
+evalType StringExpr{} = return $ Just $ makeIdentExpr "Char"
+evalType (IdentExpr ph@(_, h)) = do
+    texpr <- fmap (M.lookup h . ctxTMap) getContext
+    case texpr of
+        Just t -> return $ Just t
+        Nothing -> analyzeErrorM $ Message ph "Not defined"
+evalType (FuncExpr (_, "->") [arg, ret]) = do
+    forM_ (extractExprsFromTuple arg) $ checkType typeType
+    checkType typeType ret
+    return $ Just typeType
+evalType (FuncExpr ph@(p, h) as) = do
+    texpr <- fmap (M.lookup h . ctxTMap) getContext
+    case texpr of
+        Just t -> evalFuncRetType t
+        Nothing -> analyzeErrorM $ Message ph "Not defined"
+    where
+    -- function type -> function return type
+    evalFuncRetType:: Expr -> Analyzer (Maybe Expr)
+    evalFuncRetType = \case
+        FuncExpr (_, "->") [arg, ret] -> do
+            successful <- checkArgs (extractExprsFromTuple arg) as
+            return (if successful then Just ret else Nothing)
+        _ -> analyzeErrorM $ Message ph "Not function"
+    -- (argument values, argument types) -> is successful
+    checkArgs:: [Expr] -> [Expr] -> Analyzer Bool
+    checkArgs [] [] = return True
+    checkArgs _ [] = analyzeErrorB $ Message ph "Too few arguments"
+    checkArgs (t:ts) (a:as) = do
+        res <- checkType t a
+        rest <- checkArgs ts as
+        return $ res || rest
+
 simplifyM:: Expr -> Analyzer Expr
 simplifyM e = do
     ctx <- getContext
@@ -28,7 +62,7 @@ derivateM e = do
     return $ derivate imap tmap e
 
 typeType = makeIdentExpr "Type"
-newContext omap = Context omap buildInScope [] M.empty M.empty M.empty where
+newContext omap = Context omap buildInScope [] M.empty M.empty M.empty M.empty where
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (, typeType) buildInTypes
 
@@ -64,40 +98,6 @@ checkType t value = do
                 "Couldn't match expected type '" ++ showExpr omap at ++
                 "' with actual type '" ++ showExpr omap t ++ "'"
         Nothing -> return False
-
-evalType:: Expr -> Analyzer (Maybe Expr)
-evalType NumberExpr{} = return $ Just $ makeIdentExpr "N"
-evalType StringExpr{} = return $ Just $ makeIdentExpr "Char"
-evalType (IdentExpr ph@(_, h)) = do
-    texpr <- fmap (M.lookup h . ctxTMap) getContext
-    case texpr of
-        Just t -> return $ Just t
-        Nothing -> analyzeErrorM $ Message ph "Not defined"
-evalType (FuncExpr (_, "->") [arg, ret]) = do
-    forM_ (extractExprsFromTuple arg) $ checkType typeType
-    checkType typeType ret
-    return $ Just typeType
-evalType (FuncExpr ph@(p, h) as) = do
-    texpr <- fmap (M.lookup h . ctxTMap) getContext
-    case texpr of
-        Just t -> evalFuncRetType t
-        Nothing -> analyzeErrorM $ Message ph "Not defined"
-    where
-    -- function type -> function return type
-    evalFuncRetType:: Expr -> Analyzer (Maybe Expr)
-    evalFuncRetType = \case
-        FuncExpr (_, "->") [arg, ret] -> do
-            successful <- checkArgs (extractExprsFromTuple arg) as
-            return (if successful then Just ret else Nothing)
-        _ -> analyzeErrorM $ Message ph "Not function"
-    -- (argument values, argument types) -> is successful
-    checkArgs:: [Expr] -> [Expr] -> Analyzer Bool
-    checkArgs [] [] = return True
-    checkArgs _ [] = analyzeErrorB $ Message ph "Too few arguments"
-    checkArgs (t:ts) (a:as) = do
-        res <- checkType t a
-        rest <- checkArgs ts as
-        return $ res || rest
 
 -- (argument types, return type) -> function type
 makeFuncType:: [Expr] -> Expr -> Expr

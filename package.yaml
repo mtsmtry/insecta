@@ -16,6 +16,8 @@ dependencies:
 - containers
 - base >= 4.7 && < 5
 - mtl
+- serverless-haskell
+- aeson
 name: lightmath
 version: 0.1.0.0
 extra-source-files:

@@ -30,23 +30,10 @@ isCommutative (FuncExpr (_, f) [FuncExpr (_, g)[IdentExpr (_, a), IdentExpr (_, 
     all (==f) [g, h, i] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
 isCommutative _ = False
 
-unifyM:: Expr -> Expr -> Analyzer Maybe AssignMap
+unifyM:: Expr -> Expr -> Analyzer (Maybe AssignMap)
 unifyM p t = do
     ctx <- getContext
     return $ unify (ctxTMap ctx) p t
-
-convertType:: Expr -> Expr -> Analyzer Bool
-convertType value trgType = do
-    mt <- evalType value
-    case mt of
-        Just t -> if equas t trgType then return True else do
-            pmap <- fmap ctxPred getContext
-            pred <- M.lookup (showName trgType) pmap
-            masg <- unifyM pred value
-            case masg of
-                Just{} -> return True
-                Nothing -> return False
-        Nothing -> return False
 
 unify:: TypeMap -> Expr -> Expr -> Maybe AssignMap
 unify tmap p t = if b then Just m else Nothing where
@@ -56,7 +43,7 @@ unify tmap p t = if b then Just m else Nothing where
     unifym e (Rewrite _ a _) = unifym e a -- use newer
     unifym e@(IdentExpr (_, var)) t = case M.lookup var tmap of
         Just{} -> return $ equals e t -- if pattern is in global scope
-        Nothing -> state $ \m-> maybe (True, M.insert var (getLatestExpr t) m) (\x-> (x `equals` t, m)) $ M.lookup var m
+        Nothing -> state $ \m-> maybe (True, M.insert var (getLatestExpr t) m) (\x-> (equals x t, m)) $ M.lookup var m
     unifym (NumberExpr _ n) (NumberExpr _ n') = return $ n == n'
     unifym NumberExpr{} _ = return False
     unifym (FuncExpr f ax) (FuncExpr f' ax') = (and $ unifym' ax ax') (sameStr f f') where

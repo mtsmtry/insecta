@@ -87,8 +87,3 @@ showExprAsRewrites omap e = showExpr omap e
 
 evalString:: Expr -> String
 evalString e = ""
-
-toLatex:: OpeMap -> LatexMap -> Expr -> String
-toLatex omap lmap e@(FuncExpr (_, f) _) = let mtex = M.lookup f lmap in case mtex of
-    Just tex -> evalString $ assign (M.fromList ) tex
-    Nothing -> showExpr omap e

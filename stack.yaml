@@ -17,7 +17,9 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: ghc-8.4.4
+
+resolver: lts-12.19
+# resolver: ghc-8.4.4
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -62,3 +64,6 @@ packages:
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
+
+extra-deps:
+- serverless-haskell-0.8.7

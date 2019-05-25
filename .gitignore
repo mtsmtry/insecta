@@ -1,7 +1,10 @@
 .stack-work/
 .vscode/
 .DS_Store
+.serverless/
+node_modules/
 lightmath.cabal
 memo.txt
 ChangeLog.md
+package-lock.json
 *~
