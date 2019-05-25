@@ -3,6 +3,8 @@ service: lightmath
 provider:
   name: aws
   runtime: haskell
+  profile: default
+  region: ap-northeast-1
 
 functions:
   lightmath-func:

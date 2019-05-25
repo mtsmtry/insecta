@@ -14,9 +14,9 @@ newtype Lexer a = Lexer { runLexer::(Position, String) -> ([Message], Position, 
 newtype Parser a = Parser { runParser::[PosToken] -> ([Message], [PosToken], a) }
 
 instance Functor Lexer where
-    fmap f (Lexer g) = Lexer $ \ts -> let (m, p, ts', x) = g ts in (m, p, ts', f x)
+    fmap f (Lexer g) = Lexer $ \inStr -> let (msg, pos, str, x) = g inStr in (msg, pos, str, f x)
 instance Functor Parser where
-    fmap f (Parser g) = Parser $ \ts -> let (m, ts', x) = g ts in (m, ts', f x)
+    fmap f (Parser g) = Parser $ \inTok -> let (msg, tok, x) = g inTok in (msg, tok, f x)
 
 instance Applicative Lexer where
     pure = return
@@ -26,19 +26,20 @@ instance Applicative Parser where
     a <*> b = a >>= (<$> b)
 
 instance Monad Lexer where
-    return x = Lexer $ \(t, s) -> ([], t, s, x)
-    (Lexer h) >>= f = Lexer $ \ts ->
-        let (m, p, ts', x) = h ts
+    return x = Lexer $ \(pos, str) -> ([], pos, str, x)
+    (Lexer h) >>= f = Lexer $ \inStr ->
+        let (msg, pos, str, x) = h inStr
             (Lexer g) = f x
-            (m', p', ts'', x') = g (p, ts')
-        in  (m ++ m', p', ts'', x')
+            (msg', pos', str', x') = g (pos, str)
+        in  (msg ++ msg', pos', str', x')
+
 instance Monad Parser where
     return x = Parser ([], , x)
-    (Parser h) >>= f = Parser $ \ts ->
-        let (m, ts', x) = h ts
+    (Parser h) >>= f = Parser $ \inTok ->
+        let (msg, tok, x) = h inTok
             (Parser g) = f x
-            (m', ts'', x') = g ts'
-        in  (m ++ m', ts'', x')
+            (msg', tok', x') = g tok
+        in  (msg ++ msg', tok', x')
 
 data Position = Position Int Int | NonePosition deriving (Show)
 type PosStr = (Position, String)
