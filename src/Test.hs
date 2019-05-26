@@ -36,20 +36,20 @@ reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ o
     exprs = parseExprs str (ctxOMap ctx)
     out = case exprs of
         [a, b] -> showRewriteList (ctxOMap ctx) (toRewriteList (ctxOMap ctx) expr) where
-            mexpr = derivate (ctxIRule ctx) (ctxTMap ctx) (a, b)
+            mexpr = derivate (ctxIRule ctx) (a, b)
             expr = fromMaybe (NumberExpr NonePosition 0)  mexpr
         [input] -> showLatestExpr (ctxOMap ctx) expr ++ "\n" 
             ++ showExpr (ctxOMap ctx) expr ++ "\n" 
             ++ showExprAsRewrites (ctxOMap ctx) expr ++ "\n" 
             ++ showRewriteList (ctxOMap ctx) (toRewriteList (ctxOMap ctx) expr) where
-            expr = simplify (ctxSimps ctx) (ctxTMap ctx) (ctxSRule ctx) input
+            expr = simplify (ctxSRule ctx) input
         _ -> "parse error"
 
 unifyTest:: String -> String
 unifyTest str = out where
     exprs = parseExprs str M.empty
     [a, b] = exprs
-    out = show $ unify M.empty a b
+    out = show $ unify a b
 
 test x = forever $ getLine >>= (putStrLn . x)
 testFunc2 = test $ parserTest $ parseExpr M.empty

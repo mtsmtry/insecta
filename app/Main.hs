@@ -7,14 +7,8 @@ import Data.Aeson.Embedded
 import Test
 
 main :: IO ()
--- main = testFunc
-
--- sls invoke local -f main = lambdaMain handler
-
-
--- main = lambdaMain handler
-
-main = apiGatewayMain handler
+main = testFunc
+-- main = apiGatewayMain handler
 
 handler :: APIGatewayProxyRequest (Embedded Value) -> IO (APIGatewayProxyResponse (Embedded [String]))
 handler request = do

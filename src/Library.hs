@@ -4,6 +4,7 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map as M
+import Control.Monad
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
@@ -20,3 +21,5 @@ toJsonWith f m = "{" ++ intercalate ", " (map (\(k, v)-> show k ++ ": " ++ f v) 
 
 toJsonFormatedWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
 toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ show k ++ ": " ++ f v) (M.toList m)) ++ "\n}"
+
+maybeFlip input nothing just = maybe nothing just input

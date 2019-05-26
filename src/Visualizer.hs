@@ -44,37 +44,43 @@ showRewriteList omap (RewriteList r e rest) = showOldestExpr omap e
                                             ++ " [" ++ showReason omap r ++ "]" ++ "\n"
                                             ++ showRewriteList omap rest
 
-showFuncExpr:: OpeMap -> (OpeMap -> Expr -> String) -> PosStr -> [Expr]-> String
-showFuncExpr omap fshow (_, "tuple") as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
-showFuncExpr omap fshow (_, f) as
+showFuncExpr:: OpeMap -> (OpeMap -> Expr -> String) -> String -> [Expr]-> String
+showFuncExpr omap fshow "tuple" as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
+showFuncExpr omap fshow f as
     | not (isAlpha (head f)) && length as == 2 = let [a, b] = as; (former, latter) = (bshow a, bshow b) in case b of 
-        (FuncExpr (_, g) _)-> if isAlpha (head g) then former ++ f ++ latter else former ++ f ++ "(" ++ latter ++ ")"
+        (FuncExpr g _)-> if isAlpha (head $ show g) 
+            then former ++ f ++ latter
+            else former ++ f ++ "(" ++ latter ++ ")"
         _ -> former ++ f ++ latter
     | not (isAlpha (head f)) && length as == 1 = let arg = bshow (head as) in case head as of
-        e@(FuncExpr (_, g) _) -> if isAlpha (head g) || head g == '(' then f ++ arg else f ++ "(" ++ arg ++ ")"
+        e@(FuncExpr g _) -> if isAlpha (head $ show g) || head (show g) == '(' 
+            then f ++ arg 
+            else f ++ "(" ++ arg ++ ")"
         _ -> f ++ arg
     | otherwise = f ++ "(" ++ intercalate ", " (map (fshow omap) as) ++ ")" where
         getPre h = maybe 100 (\(_, x, _)-> x) $ M.lookup h omap
-        bshow e@(FuncExpr (_, g) as) = if length g == 2 && getPre f > getPre g then "(" ++ fshow omap e ++ ")" else fshow omap e
+        bshow e@(FuncExpr g as) = if length (show g) == 2 && getPre f > getPre (show g) 
+            then "(" ++ fshow omap e ++ ")" 
+            else fshow omap e
         bshow e = fshow omap e
 
 showExpr:: OpeMap -> Expr -> String
 showExpr omap (Rewrite _ a b) = "[" ++ showExpr omap a ++ ", " ++ showExpr omap b ++ "]"  -- error "Can not use Rewrite"
-showExpr omap (StringExpr (_, s)) = "\"" ++ s ++ "\"" 
-showExpr omap (IdentExpr (_, x)) = x
+showExpr omap (StringExpr str) = "\"" ++ show str ++ "\"" 
+showExpr omap (IdentExpr id) = show id
 showExpr omap (NumberExpr _ n) = show n
-showExpr omap (FuncExpr f as) = showFuncExpr omap showExpr f as
+showExpr omap (FuncExpr f as) = showFuncExpr omap showExpr (show f) as
 
 showLatestExpr omap (Rewrite _ a _) = showLatestExpr omap a
-showLatestExpr omap (FuncExpr f as) = showFuncExpr omap showLatestExpr f as
+showLatestExpr omap (FuncExpr f as) = showFuncExpr omap showLatestExpr (show f) as
 showLatestExpr omap e = showExpr omap e
 
 showOldestExpr omap (Rewrite _ _ b) = showLatestExpr omap b
-showOldestExpr omap (FuncExpr f as) = showFuncExpr omap showOldestExpr f as
+showOldestExpr omap (FuncExpr f as) = showFuncExpr omap showOldestExpr (show f) as
 showOldestExpr omap e = showExpr omap e
 
-showCodeExpr:: OpeMap -> Expr -> PosStr
-showCodeExpr omap e = (getExprPos e, showOldestExpr omap e)
+showCodeExpr:: OpeMap -> Expr -> Ident
+showCodeExpr omap e =  StringIdent (toPos $ showIdent e) $ showOldestExpr omap e 
 
 showExprAsRewrites:: OpeMap -> Expr -> String
 showExprAsRewrites omap e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
@@ -82,7 +88,7 @@ showExprAsRewrites omap e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
     expandRewrite:: Expr -> [Expr]
     expandRewrite (Rewrite e a b) = expandRewrite b ++ expandRewrite a
     expandRewrite e = [e]
-showExprAsRewrites omap (FuncExpr h as) = showFuncExpr omap showExprAsRewrites h as
+showExprAsRewrites omap (FuncExpr h as) = showFuncExpr omap showExprAsRewrites (show h) as
 showExprAsRewrites omap e = showExpr omap e
 
 evalString:: Expr -> String

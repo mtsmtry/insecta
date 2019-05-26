@@ -15,54 +15,51 @@ import Rewriter
 import Data
 import Visualizer
 
-evalType:: Expr -> Analyzer (Maybe Expr)
-evalType NumberExpr{} = return $ Just $ makeIdentExpr "N"
-evalType StringExpr{} = return $ Just $ makeIdentExpr "Char"
-evalType (IdentExpr ph@(_, h)) = do
-    texpr <- fmap (M.lookup h . ctxTMap) getContext
-    case texpr of
-        Just t -> return $ Just t
-        Nothing -> analyzeErrorM $ Message ph "Not defined"
-evalType (FuncExpr (_, "->") [arg, ret]) = do
-    forM_ (extractExprsFromTuple arg) $ checkType typeType
-    checkType typeType ret
-    return $ Just typeType
-evalType (FuncExpr ph@(p, h) as) = do
-    texpr <- fmap (M.lookup h . ctxTMap) getContext
-    case texpr of
-        Just t -> evalFuncRetType t
-        Nothing -> analyzeErrorM $ Message ph "Not defined"
+simplifyM = onCtx ctxSRule simplify
+derivateM = onCtx ctxIRule derivate
+
+typeExpr:: Expr -> Analyzer (Maybe Expr)
+typeExpr e@NumberExpr{} = return $ Just e
+typeExpr e@StringExpr{} = return $ Just e
+typeExpr (IdentExpr id@(StringIdent pos var)) = do
+    ment <- lookupEnt var
+    maybeFlip ment (analyzeErrorM id "Not defined") $ \ent->
+        return $ Just $ IdentExpr (EntityIdent pos ent)
+typeExpr (FuncExpr (StringIdent pos "->") [a, b]) = do
+    marg <- typeExpr a
+    mret <- typeExpr b
+    case (marg, mret) of
+        (Just arg, Just ret) -> return $ Just $ FuncExpr (FuncTypeIdent pos) [arg, ret]
+        _ -> return Nothing
+typeExpr (FuncExpr id@(StringIdent _ fun) as) = do
+    ment <- lookupEnt fun
+    margs <- mapM typeExpr as
+    maybeFlip ment (analyzeErrorM id "Not defined") $ \ent->
+        evalFunc (texpr ent) margs
     where
-    -- function type -> function return type
-    evalFuncRetType:: Expr -> Analyzer (Maybe Expr)
-    evalFuncRetType = \case
-        FuncExpr (_, "->") [arg, ret] -> do
-            successful <- checkArgs (extractExprsFromTuple arg) as
-            return (if successful then Just ret else Nothing)
-        _ -> analyzeErrorM $ Message ph "Not function"
-    -- (argument values, argument types) -> is successful
-    checkArgs:: [Expr] -> [Expr] -> Analyzer Bool
-    checkArgs [] [] = return True
-    checkArgs _ [] = analyzeErrorB $ Message ph "Too few arguments"
-    checkArgs (t:ts) (a:as) = do
-        res <- checkType t a
-        rest <- checkArgs ts as
-        return $ res || rest
-
-simplifyM:: Expr -> Analyzer Expr
-simplifyM e = do
-    ctx <- getContext
-    let (simp, tmap, smap) = (ctxSimps ctx, ctxTMap ctx, ctxSRule ctx)
-    return $ simplify simp tmap smap e
-
-derivateM:: (Expr, Expr) -> Analyzer (Maybe Expr)
-derivateM e = do
-    ctx <- getContext
-    let (imap, tmap) = (ctxSRule ctx, ctxTMap ctx)
-    return $ derivate imap tmap e
+    evalFunc:: Expr -> [Maybe Expr] -> Analyzer (Maybe Expr)
+    evalFunc (FuncExpr f@(FuncTypeIdent _) [targ, ret]) args = do
+        let targs = extractExprsFromTuple targ
+        if length targs /= length args
+            then analyzeErrorM f "Argument number wrong"
+            else do
+                mapM_ (uncurry checkType) $ zip args targs
+                return $ Just $ ret
+    evalFunc e _ = do
+        ps <- onOpeMap showCodeExpr e
+        analyzeErrorM ps "Not function"
+    checkType:: Maybe Expr -> Expr -> Analyzer ()
+    checkType (Just value) texpr = unless (evalType value `equals` texpr) $ do
+        vstr <- onOpeMap showExpr value
+        tstr <- onOpeMap showExpr texpr
+        let msg = "Couldn't match expected type '" ++ vstr ++ "' with actual type '" ++ tstr ++ "'"
+        analyzeError (showIdent value) msg
+    checkType _ _ = return ()
 
 typeType = makeIdentExpr "Type"
-newContext omap = Context omap buildInScope [] M.empty M.empty M.empty M.empty where
+
+newContext:: OpeMap -> Context
+newContext omap = Context omap buildInScope [] M.empty M.empty M.empty M.empty M.empty where
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (, typeType) buildInTypes
 
@@ -70,7 +67,7 @@ returnMessage:: a -> Message -> Analyzer a
 returnMessage a m = Analyzer $ \ctx-> ([m], ctx, a)
 
 isIdentOf:: String -> Expr -> Bool
-isIdentOf t (IdentExpr (_, s)) = t == s
+isIdentOf t (IdentExpr id) = t == show id
 isIdentOf _ _ = False
 
 isTypeType:: Expr -> Bool
@@ -79,78 +76,41 @@ isTypeType = isIdentOf "Type"
 -- concat specified function arguments
 -- ex. extractArgs "add" add(add(1, 2), add(3, 4)) => [1, 2, 3, 4]
 extractArgs:: String -> Expr -> [Expr]
-extractArgs s e@(FuncExpr (_, s') as) = if s == s' then concatMap (extractArgs s) as else [e]
-extractArgs s e = [e]
+extractArgs str e@(FuncExpr f as) = if str == show f then concatMap (extractArgs str) as else [e]
+extractArgs str e = [e]
 
 -- ex. (1, 2) => [1, 2], x => [x]
 extractExprsFromTuple:: Expr -> [Expr]
-extractExprsFromTuple (FuncExpr (_, "tuple") xs) = xs
+extractExprsFromTuple x@(FuncExpr f xs) = if show f == "tuple" then xs else [x]
 extractExprsFromTuple x = [x]
-
-checkType:: Expr -> Expr -> Analyzer Bool
-checkType t value = do
-    atexpr <- evalType value
-    omap <- fmap ctxOMap getContext
-    case atexpr of
-        Just at -> if equals t at
-            then return True 
-            else analyzeErrorB $ Message (showCodeExpr omap value) $
-                "Couldn't match expected type '" ++ showExpr omap at ++
-                "' with actual type '" ++ showExpr omap t ++ "'"
-        Nothing -> return False
 
 -- (argument types, return type) -> function type
 makeFuncType:: [Expr] -> Expr -> Expr
-makeFuncType [arg] ret = FuncExpr (NonePosition, "->") [arg, ret]
-makeFuncType args ret = FuncExpr (NonePosition, "->") [FuncExpr (NonePosition, "tuple") args, ret]
+makeFuncType [arg] ret = FuncExpr (FuncTypeIdent NonePosition) [arg, ret]
+makeFuncType args ret = FuncExpr (FuncTypeIdent NonePosition) [FuncExpr (StringIdent NonePosition "tuple") args, ret]
 
 -- (identitfer, type, scope) -> new scope
-addIdent:: PosStr -> Expr -> Analyzer ()
-addIdent ps@(_, s) t = do
-    texpr <- evalType t
-    case texpr of 
-        Nothing -> return ()
-        Just typeOfType -> if isTypeType typeOfType
-            then updateScope $ M.insert s t
-            else analyzeError $ Message ps "Not type"
+addIdent:: Ident -> Expr -> Analyzer ()
+addIdent id texpr = do
+    if isTypeType (evalType texpr)
+        then updateScope $ M.insert (show id) texpr
+        else analyzeError id "Not type"
 
-getName (FuncExpr (_, f) _) = f
--- (scope, expression) -> (is step rule, rule)
 insertRule:: Expr -> Analyzer ()
-insertRule e@(FuncExpr pk@(p, kind) [a@(FuncExpr (_, h) _), b]) = insertRule' kind where
-    insertRule':: String -> Analyzer ()
-    insertRule' ">>=" = do
-        at' <- evalType a
-        bt' <- evalType b
-        case (at', bt') of
-            (Just at, Just bt)-> if equals at bt
-                then do
-                    addSimp a b
-                    updateSRule $ M.insertWith (++) (getName a) [(a, b)]
-                else do
-                    left <- onOpeMap showExpr at
-                    right <- onOpeMap showExpr bt
-                    let msg = "Left side type is '" ++ left ++ "', " ++ "but right side type is '" ++ right ++ "'"
-                    analyzeError $ Message pk msg
-            _-> return ()
-    insertRule' "=>" = do 
-        et' <- evalType e
-        case et' of
-            Just et-> if isIdentOf "Prop" et 
-                then updateIRule $ M.insertWith (++) (getName a) [(a, b)]
-                else do
-                    str <- onOpeMap showExpr et
-                    analyzeError $ Message pk $ "Couldn't match expected type 'Prop' with actual type '" ++ str ++ "'"
-            Nothing-> return ()
-    insertRule' f = analyzeError $ Message pk "Wrong function"
-
-insertRule e@(FuncExpr _ _) = do 
-    ps <- onOpeMap showCodeExpr e
-    analyzeError $ Message ps "This is not a function"
-
-insertRule e = do
-    ps <- onOpeMap showCodeExpr e
-    analyzeError $ Message ps "This is not a function"
+insertRule rule = do
+    nrule <- typeExpr rule
+    case nrule of
+        Just (FuncExpr f [a@(FuncExpr g _), b]) -> insertRule a b (show f) (show g)
+        Just expr@FuncExpr{} -> analyzeError (showIdent expr) "Left side must be a function"
+        Just expr -> analyzeError (showIdent expr) "wrong function"
+        Nothing -> return ()
+    where
+    insertRule:: Expr -> Expr -> String -> String -> Analyzer ()
+    insertRule before after ">>=" f = do
+        addSimp before after
+        updateSRule $ M.insertWith (++) f [(before, after)]
+    insertRule before after "=>" f = updateIRule $ M.insertWith (++) f [(before, after)]
+    insertRule before _ _ _ = analyzeError (showIdent before) "Wrong function"
 
 runCommand:: Command -> Expr -> Expr -> Analyzer Expr
 runCommand StepCmd goal input = do
@@ -179,9 +139,9 @@ runStatement input = \case
     AssumeStm cmd ass first main -> do
         -- P => X -> [A, B, C]
         -- [P, Q, X -> [A, B, C]]
-        begin <- runCommand cmd input (FuncExpr (NonePosition, "->") [ass, first])
+        begin <- runCommand cmd input (FuncExpr (StringIdent NonePosition "=>") [ass, first])
         block <- runStatement first main
-        return $ Rewrite EqualReason begin (FuncExpr (NonePosition, "->") [ass, block])
+        return $ Rewrite EqualReason begin (FuncExpr (StringIdent NonePosition "=>") [ass, block])
     BlockStm stms -> runStms stms input where 
         runStms:: [Statement] -> Expr -> Analyzer Expr
         runStms xs input = foldM runStatement input xs
@@ -193,40 +153,41 @@ subScope subRountine = do
     updateScope $ const tmap
     return res
 
+loadVarDec:: (Ident, Expr) -> Analyzer ()
+loadVarDec (ident, texpr) = do
+    mnt <- typeExpr texpr
+    maybeFlip mnt (return ()) $ \nt-> addIdent ident nt
+
 -- reflect a declaration in the global scope and analyze type and proof
 loadDecla:: Decla -> Analyzer ()
-loadDecla (Theorem dec prop stm) = subScope $ do
-    mapM_ (uncurry addIdent) dec
-    case prop of
-        FuncExpr ps@(p, kind) [start, goal] -> case kind of 
-            "=>" -> do
-                res <- runStatement start stm
-                return ()
-        _ -> do
-            str <- onOpeMap showCodeExpr prop
-            analyzeError $ Message str "Neither '>>=' or '=>'"
+loadDecla (Theorem decs prop stm) = subScope $ do
+    mapM_ (mapM_ loadVarDec) decs
+    mnprop <- typeExpr prop
+    maybeFlip mnprop (return ()) $ \nprop-> do
+        case nprop of
+            (FuncExpr _ [start, _]) -> runStatement start stm
+        insertRule nprop
+
+loadDecla (Axiom decs prop) = subScope $ do
+    mapM_ (mapM_ loadVarDec) decs
     insertRule prop
 
-loadDecla (Axiom dec prop) = subScope $ do
-    mapM_ (uncurry addIdent) dec
-    insertRule prop
-
-loadDecla (Undef t@(_, s) e mtex) = do
-    addIdent t e
+loadDecla (Undef id e mtex) = do
+    addIdent id e
     case mtex of 
-        Just tex -> updateLatex $ M.insert s tex
+        Just tex -> updateLatex $ M.insert (show id) tex
         Nothing -> return ()
 
 loadDecla (Define t args ret def) = do
     subScope $ do
-        mapM_ (uncurry addIdent) args
-    addIdent t (makeFuncType (map snd args) ret)
+        mapM_ (mapM_ loadVarDec) args
+    addIdent t (makeFuncType (map snd (head args)) ret)
 
-loadDecla (DataType t@(_, i) def) = do
-    addIdent t typeType
+loadDecla (DataType id def) = do
+    addIdent id typeType
     addCstr cstrs
     where
-    thisType = makeIdentExpr i
+    thisType = makeIdentExpr (show id)
     cstrs = extractArgs "|" def
     addCstr:: [Expr] -> Analyzer ()
     addCstr [] = return ()
@@ -234,10 +195,10 @@ loadDecla (DataType t@(_, i) def) = do
         addIdent x thisType
         addCstr xs
     addCstr (FuncExpr x as:xs) = do
-        argsm <- mapM evalType as
+        argsm <- mapM typeExpr as
         case conjMaybe argsm of
             Just args -> do
-                let cstrType = makeFuncType args thisType
+                let cstrType = makeFuncType (map evalType args) thisType
                 addIdent x cstrType
                 addCstr xs
             Nothing -> return ()
