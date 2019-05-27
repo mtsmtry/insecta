@@ -12,141 +12,155 @@ import Control.Applicative
 import Library
 import Data
 
-isAssociative:: Rule -> Bool
-isAssociative (FuncExpr f [IdentExpr a, IdentExpr b], FuncExpr g [IdentExpr p, IdentExpr q]) = 
-    f == g && a == q && b == p
-isAssociative _ = False
+unify:: Formula -> Formula -> Maybe AssignMap
+unify ptn trg = unifym ptn trg M.empty
 
-isCommutative:: Rule -> Bool
-isCommutative (FuncExpr f [FuncExpr g [IdentExpr a, IdentExpr b], IdentExpr c], 
-               FuncExpr h [IdentExpr x, FuncExpr i [IdentExpr y, IdentExpr z]]) = 
-    all (==f) [g, h, i] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
-isCommutative _ = False
-
-evalType:: Expr -> Expr
-evalType StringExpr{} = makeIdentExpr "Char"
-evalType NumberExpr{} = makeIdentExpr "N"
-evalType (IdentExpr (EntityIdent _ ent)) = texpr ent
-evalType (FuncExpr (EntityIdent _ ent) _) = texpr ent
-evalType (Rewrite _ newer _) = evalType newer
-
-unify:: Expr -> Expr -> Maybe AssignMap
-unify p t = if b then Just m else Nothing where
-    (b, m) = (runState $ unifym p t) M.empty
-    unifym:: Expr -> Expr -> State AssignMap Bool
-    unifym Rewrite{} _ = error "Do not use Rewrite in a rule"
-    unifym e (Rewrite _ a _) = unifym e a -- use newer
-    unifym e@(IdentExpr (EntityIdent _ ent)) t = if isGlb ent 
-        then return $ equals e t -- if pattern is in global scope
-        else case M.lookup (name ent) m of
-            Just x -> state (equals x t, )
-            Nothing -> state $ (True, ) . M.insert (name ent) (getLatestExpr t)
-    unifym (NumberExpr _ n) (NumberExpr _ n') = return $ n == n'
-    unifym NumberExpr{} _ = return False
-    unifym (FuncExpr f ax) (FuncExpr f' ax') = (and $ unifym' ax ax') (f == f') where
-        and f r = if r then f else return False
-        unifym' (e:ex) (e':ex') = unifym e e' >>= and (unifym' ex ex')
-        unifym' [] [] = return True
-        unifym' _ _ = return False
-    unifym FuncExpr{} _ = return False
-
-assign:: M.Map String Expr -> Expr -> Expr
-assign m e@(IdentExpr var) = fromMaybe e $ M.lookup (show var) m
-assign m (FuncExpr f as) = FuncExpr f $ map (assign m) as
-assign m e = e
-
-equals:: Expr -> Expr -> Bool
-equals (IdentExpr a) (IdentExpr b) = a == b
-equals (FuncExpr f as) (FuncExpr g bs) = (f == g) && all (uncurry equals) (zip as bs)
-equals (NumberExpr _ n) (NumberExpr _ m) = n == m
-equals (StringExpr a) (StringExpr b) = a == b
-equals Rewrite{} _ = error "Can not use Rewrite"
-equals _ Rewrite{} = error "Can not use Rewrite"
-equals _ _ = False
-
-addSimp:: Expr -> Expr -> Analyzer ()
-addSimp (FuncExpr f _) (FuncExpr g _) = do
-    m <- fmap ctxSimps getContext
-    let (fn, gn) = (show f, show g)
-    case (elemIndex fn m, elemIndex gn m) of
-        (Just fi, Just gi) -> when (fi > gi) $ analyzeError g "Not as simple as the left side"
-        (Just fi, Nothing) -> updateSimp $ insertAt gn fi
-        (Nothing, Just gi) -> updateSimp $ insertAt fn (gi+1)
-        (Nothing, Nothing) -> updateSimp $ (\m-> gn:fn:m)
+unifym:: Formula -> Formula -> AssignMap -> Maybe AssignMap
+unifym TypeOfType TypeOfType = id . Just
+unifym ptnWhole@(Formula ptnBody ptnType) trgWhole@(Formula trgBody trgType) = \m-> do
+    typeAsg <- unifym ptnType trgType m
+    bodyAsg <- unifyBody ptnBody trgBody typeAsg
+    return $ M.union typeAsg bodyAsg
     where
-    insertAt:: a -> Int -> [a] -> [a]
-    insertAt x 0 as = x:as
-    insertAt x i (a:as) = a:insertAt x (i - 1) as
-addSimp _ (FuncExpr g _) = do 
-    updateSimp $ (\m-> (show g):m)
-    analyzeError g "You can not use constants on the left side"
-addSimp (FuncExpr f _) _ = do 
-    m <- fmap ctxSimps getContext
-    let fn = show f
-    if fn `elem` m then return () else updateSimp (fn:)
-addSimp f _ = analyzeError (showIdent f) "Constants always have the same simplicity"
+    toUnify:: Bool -> AssignMap -> Maybe AssignMap
+    toUnify cond = \m-> if cond then Just m else Nothing
 
--- どれか一つの引数に効果を適用し、同じ順番で引数を返す
--- 適用できる引数がなかったときはNothingを返す
-applyArgs:: (Expr -> Maybe Expr) -> [Expr] -> Maybe [Expr]
-applyArgs f xs = applyArgs' xs [] where
-    applyArgs':: [Expr] -> [Expr] -> Maybe [Expr]
-    applyArgs' [] _ = Nothing
-    applyArgs' (a:as) as' = maybe (applyArgs' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
+    unifyBody:: FormulaBody -> FormulaBody -> AssignMap -> Maybe AssignMap
+    unifyBody Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
+    unifyBody ptn trg@Rewrite{} = unifym ptnWhole $ later trg
+    unifyBody ptn@ConstFormula{} trg = toUnify $ ptn == trg
+    unifyBody ptn@NumberFormula{} trg = toUnify $ ptn == trg
+    unifyBody ptn@StringFormula{} trg = toUnify $ ptn == trg
 
-simplify:: RuleMap -> Expr -> Expr
-simplify m e = maybe e (simplify m) $ step e where
-    step:: Expr -> Maybe Expr
+    unifyBody ptn@(VarFormula id) trg = \m-> case M.lookup (idStr id) m of
+        Just x -> if fomBody x == trg then Just m else Nothing
+        Nothing -> Just $ M.insert (idStr id) (latestFormula trgWhole) m
+
+    unifyBody (FunFormula f ax) (FunFormula f' ax') = if f == f' then unifyArgs ax ax' else const Nothing where
+        unifyArgs:: [Formula] -> [Formula] -> AssignMap -> Maybe AssignMap
+        unifyArgs (e:ex) (e':ex') = unifym e e' <&&> unifyArgs ex ex'
+        unifyArgs [] [] = id . Just
+        unifyArgs _ _ = const Nothing
+
+    unifyBody (ACFunFormula f rest ax) (ACFunFormula f' rest' ax') = if f == f' then match ax ax' else const Nothing where
+        match:: [Formula] -> [Formula] -> AssignMap -> Maybe AssignMap
+        match [] trgs = Just . M.insert rest (Formula (ACFunFormula f "" trgs) trgType)
+        match (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs where
+
+        matchForPtn:: Formula -> [Formula] -> [Formula] -> [Formula] -> AssignMap -> Maybe AssignMap
+        matchForPtn ptn ptns noMatchTrgs [] = const Nothing
+        matchForPtn ptn ptns noMatchTrgs (trg:restTrgs) = main <||> rest where
+            main = unifym ptn trg <&&> match ptns (noMatchTrgs ++ restTrgs)
+            rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
+
+    unifyBody _ _ = const Nothing
+
+    (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
+    a <||> b = \m-> a m <|> b m
+    (<&&>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
+    a <&&> b = \m-> a m >>= \m'-> b m'
+
+assign:: AssignMap -> Formula -> Formula
+assign m fom@(Formula (VarFormula id) etype) = fromMaybe fom $ M.lookup (idStr id) m
+assign m fom = applyArgs (assign m) fom
+
+insertSimp:: Ident -> Formula -> Formula -> Analyzer ()
+insertSimp id a b = case (funIdent a, funIdent b) of
+    (Just fn, Just gn) -> insertSimpByName (idStr fn) (idStr gn)
+    (Nothing, Just gn) -> do 
+        updateList (idStr gn:)
+        analyzeError id "You can not use constants on the left side"
+    (Just fn, Nothing) -> do 
+        simps <- fmap conList getContext
+        let f = idStr fn
+        if f `elem` simps then return () else updateList (f:)
+    (Nothing, Nothing) -> analyzeError id "Constants always have the same simplicity"
+    where
+    insertSimpByName:: String -> String -> Analyzer ()
+    insertSimpByName f g = do
+        m <- fmap conList getContext
+        case (elemIndex f m, elemIndex g m) of
+            (Just fi, Just gi) -> when (fi > gi) $ analyzeError id "Not as simple as the left side"
+            (Just fi, Nothing) -> updateList $ insertAt g fi
+            (Nothing, Just gi) -> updateList $ insertAt f (gi+1)
+            (Nothing, Nothing) -> updateList (\m-> g:f:m)
+        where
+        insertAt:: a -> Int -> [a] -> [a]
+        insertAt x 0 as = x:as
+        insertAt x i (a:as) = a:insertAt x (i - 1) as
+
+applyArgsOnce:: (Formula -> Maybe Formula) -> [Formula] -> Maybe [Formula]
+applyArgsOnce f xs = applyArgsOnce' xs [] where
+    applyArgsOnce':: [Formula] -> [Formula] -> Maybe [Formula]
+    applyArgsOnce' [] _ = Nothing
+    applyArgsOnce' (a:as) as' = maybe (applyArgsOnce' as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (f a)
+
+simplify:: Simplicity -> RuleMap -> Formula -> Formula
+simplify simps m e = maybe e (simplify simps m) $ step e where
+    step:: Formula -> Maybe Formula
     step e = applyByHeadList heads e where
         simpCompare a b = a `compare` b
         heads = sortBy simpCompare $ lookupHeads e
-    lookupHeads:: Expr -> [(String, Int)]
-    lookupHeads (Rewrite _ a _) = lookupHeads a
-    lookupHeads (FuncExpr f as) = (show f, (simp . getEnt) f):concatMap lookupHeads as
-    lookupHeads _ = []
-    apply:: [Rule] -> Expr -> Maybe Expr
-    apply (r@(a, b):rs) e = maybe (apply rs e) (\m-> Just $ Rewrite (StepReason r m) (assign m b) e) (unify a e)
-    apply [] e = Nothing
-    applyAtSimp:: [Rule] -> Int -> Expr -> Maybe Expr
-    applyAtSimp rs s (Rewrite r a b) = applyAtSimp rs s a >>= \x-> Just $ Rewrite r x b
-    applyAtSimp rs s e@(FuncExpr h as) = 
-        if s == (simp . getEnt) h then apply rs e <|> e' else e' where
-            e' = applyArgs (applyAtSimp rs s) as >>= Just . FuncExpr h
+
+    lookupHeads:: Formula -> [(String, Int)]
+    lookupHeads rew@Rewrite{} = lookupHeads $ later rew
+    lookupHeads fom@Formula{} = case getHeadAndArgs (fomBody fom) of
+        Just (fun, args) -> maybe rest (:rest) head where
+            head = elemIndex (idStr fun) simps >>= Just . (idStr fun, )
+            rest = concatMap lookupHeads args
+        Nothing -> []
+
+    getHeadAndArgs:: FormulaBody -> Maybe (Ident, [Formula])
+    getHeadAndArgs fom@FunFormula{} = Just (funName fom, funArgs fom)
+    getHeadAndArgs fom@CFunFormula{} = Just (comName fom, let (a, b) = comArgSet fom in [a, b])
+    getHeadAndArgs fom@ACFunFormula{} = Just (acName fom, acArgs fom)
+    getHeadAndArgs _ = Nothing
+
+    apply:: [Rule] -> Formula -> Maybe Formula
+    apply (rule@(a, b):rules) e = maybe (apply rules e) (\m-> Just $ Rewrite (StepReason rule m) (assign m b) e) (unify a e)
+    apply [] _ = Nothing
+
+    applyAtSimp:: [Rule] -> Int -> Formula -> Maybe Formula
+    applyAtSimp rules simp (Rewrite r a b) = applyAtSimp rules simp a >>= \x-> Just $ Rewrite r x b
+    applyAtSimp rules simp (Formula (FunFormula h as) _) = 
+        if simp == (simp . getEnt) h then apply rules e <|> e' else e' where
+            e' = applyArgs (applyAtSimp rules simp) as >>= Just . FunFormula h
     applyAtSimp _ _ _ = Nothing
-    applyByHeadList:: [(String, Int)] -> Expr -> Maybe Expr
+
+    applyByHeadList:: [(String, Int)] -> Formula -> Maybe Formula
     applyByHeadList [] _ = Nothing
     applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList xs e
 
-mergeRewrite:: Expr -> Expr -> Maybe Expr
+mergeRewrite:: Formula -> Formula -> Maybe Formula
 mergeRewrite = mergeRewrite Nothing where
-    mergeRewrite:: Maybe (Reason, Expr, Reason) -> Expr -> Expr -> Maybe Expr
+    mergeRewrite:: Maybe (Reason, Formula, Reason) -> Formula -> Formula -> Maybe Formula
     mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = if equals a a'
         then mergeRewrite (Just (r, a, r')) b b'
         else case junction of
             Just (jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
             Nothing -> Nothing
-    mergeRewrite _ former latter@(Rewrite r a b) = if equals former a
+    mergeRewrite _ former latter@(Rewrite r a b) = if former == a
         then mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
         else Nothing
     mergeRewrite _ former@(Rewrite r a b) latter = if equals a latter
         then mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
         else Nothing
-    mergeRewrite _ (FuncExpr f as) (FuncExpr g bs) = if f == g
-        then FuncExpr f <$> conjMaybe (zipWith (mergeRewrite Nothing) as bs)
+    mergeRewrite _ (FunFormula f as) (FunFormula g bs) = if f == g
+        then FunFormula f <$> conjMaybe (zipWith (mergeRewrite Nothing) as bs)
         else Nothing
     mergeRewrite _ a b = if equals a b then Just a else Nothing
-    appendStep:: Reason -> Expr -> Expr -> Expr
+    appendStep:: Reason -> Formula -> Formula -> Formula
     appendStep r' t (Rewrite r a b) = Rewrite r a (appendStep r' t b)
     appendStep r t u = Rewrite r u t
 
-type Derivater = (Expr, Expr) -> Maybe Expr
-derivate:: RuleMap -> (Expr, Expr) -> Maybe Expr
+type Derivater = (Formula, Formula) -> Maybe Formula
+derivate:: RuleMap -> (Formula, Formula) -> Maybe Formula
 derivate m = applyDiff derivateByRuleList where
-    applyDiff:: Derivater -> (Expr, Expr) -> Maybe Expr
-    applyDiff d pair@(FuncExpr f as, FuncExpr g bs) = if f == g && length as == length bs
+    applyDiff:: Derivater -> (Formula, Formula) -> Maybe Formula
+    applyDiff d pair@(Formula (FunFormula f as) _, Formula (FunFormula g bs) _) = if f == g && length as == length bs
         then case num of
             0 -> Nothing
-            1 -> derivate m x >>= \t-> Just $ FuncExpr f (map snd xs' ++ t:map snd xs) where
+            1 -> derivate m x >>= \t-> Just $ FunFormula f (map snd xs' ++ t:map snd xs) where
                 (xs', x:xs) = splitAt idx args
             _ -> d pair
         else d pair where
@@ -162,7 +176,7 @@ derivate m = applyDiff derivateByRuleList where
     applyDiff d pair = d pair
 
     derivateByRuleList:: Derivater
-    derivateByRuleList pair@(FuncExpr h as, goal) = M.lookup (show h) m 
+    derivateByRuleList pair@(FunFormula h as, goal) = M.lookup (show h) m 
         >>= foldr ((<|>) . flip derivateByRule pair) Nothing
     derivateByRuleList _ = Nothing
 
@@ -172,15 +186,3 @@ derivate m = applyDiff derivateByRuleList where
         derivate' r@(ra, rb) (ta, tb) = unify ra ta >>= \m-> if assign m rb `equals` tb 
             then Just $ Rewrite (ImplReason r m) tb ta
             else Nothing
-
-getLatestExpr:: Expr -> Expr
-getLatestExpr (Rewrite _ a _) = getLatestExpr a
-getLatestExpr e = e 
-
-getOldestExpr:: Expr -> Expr
-getOldestExpr (Rewrite _ _ b) = getOldestExpr b
-getOldestExpr e = e
-
-extractMaybe:: [Maybe a] -> [a]
-extractMaybe [] = []
-extractMaybe (x:xs) = maybe (extractMaybe xs) (:extractMaybe xs) x

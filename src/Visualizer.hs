@@ -12,7 +12,6 @@ import Control.Arrow
 import Control.Applicative
 import Library
 import Data
-import Rewriter
 
 data RewriteList = RewriteExpr Expr | RewriteList Reason Expr RewriteList
 

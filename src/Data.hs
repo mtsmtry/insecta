@@ -10,12 +10,16 @@ import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
 
+-- Lexer Monad
 newtype Lexer a = Lexer { runLexer::(Position, String) -> ([Message], Position, String, a) }
+
 instance Functor Lexer where
     fmap f (Lexer g) = Lexer $ \inStr -> let (msg, pos, str, x) = g inStr in (msg, pos, str, f x)
+
 instance Applicative Lexer where
     pure = return
     a <*> b = a >>= (<$> b)
+
 instance Monad Lexer where
     return x = Lexer $ \(pos, str) -> ([], pos, str, x)
     (Lexer h) >>= f = Lexer $ \inStr ->
@@ -24,12 +28,16 @@ instance Monad Lexer where
             (msg', pos', str', x') = g (pos, str)
         in  (msg ++ msg', pos', str', x')
 
+-- Parser Monad
 newtype Parser a = Parser { runParser::[PosToken] -> ([Message], [PosToken], a) }
+
 instance Functor Parser where
     fmap f (Parser g) = Parser $ \inTok -> let (msg, tok, x) = g inTok in (msg, tok, f x)
+
 instance Applicative Parser where
     pure = return
     a <*> b = a >>= (<$> b)
+
 instance Monad Parser where
     return x = Parser ([], , x)
     (Parser h) >>= f = Parser $ \inTok ->
@@ -38,101 +46,7 @@ instance Monad Parser where
             (msg', tok', x') = g tok
         in  (msg ++ msg', tok', x')
 
-data Position = Position Int Int | NonePosition deriving (Show)
-
-showIdent:: Expr -> Ident
-showIdent (IdentExpr id) = id 
-showIdent (StringExpr id) = id
-showIdent (NumberExpr p n) = StringIdent p (show n)
-showIdent (Rewrite _ a _) = showIdent a
-showIdent (FuncExpr id _) = id
-
-toPos:: Ident -> Position
-toPos (StringIdent pos _) = pos
-toPos (EntityIdent pos _) = pos
-toPos (FuncTypeIdent pos) = pos
-
-data PosToken = PosToken Position Token deriving (Show)
-data Message = Message Ident String deriving (Show)
-
-data Token = Ident String | Number Int | Literal String | LiteralOne Char | Symbol String | Operator String
-    | Comma | ParenOpen | ParenClose | EndToken deriving (Eq, Show)
-showToken:: Token -> String
-showToken (Symbol s) = s
-showToken (Operator s) = s
-showToken (Ident s) = s
-showToken (Number n) = show n
-showToken (Literal s) = '"':s ++ "\""
-showToken (LiteralOne s) = ['\'', s, '\'']
-showToken Comma = ","
-showToken ParenOpen = "("
-showToken ParenClose = ")"
-
-type Rule = (Expr, Expr)
-type OpeMap = M.Map String (Int, Int, Bool) -- (argument number, preceed, is left associative)
-type AssignMap = M.Map String Expr
-
-type VarDec = [(Ident, Expr)]
-data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
-data Command = StepCmd | ImplCmd | WrongCmd String deriving (Show)
-
-data Entity = Entity { name::String, texpr::Expr, simp::Int, isGlb::Bool }
-
-data Ident = StringIdent Position String | EntityIdent Position Entity | FuncTypeIdent Position
-instance Eq Ident where
-    a == b = show a == show b
-instance Show Ident where
-    show (StringIdent _ str) = str
-    show (EntityIdent _ ent) = name ent
-
-getEnt (EntityIdent _ ent) = ent
-
-data Expr = IdentExpr Ident
-    | FuncExpr Ident [Expr]
-    | StringExpr Ident
-    | NumberExpr Position Int
-    | Rewrite Reason Expr Expr deriving (Show)
-
-makeIdentExpr:: String -> Expr
-makeIdentExpr str = IdentExpr $ StringIdent NonePosition str
-
-initialPosition = Position 1 1
-
-stepChar (Position l c) n = Position l (c+n)
-nextChar (Position l c) = Position l (c+1)
-nextLine (Position l c) = Position (l+1) 1
-    
-data Statement = SingleStm Command Expr
-    | BlockStm [Statement]
-    | AssumeStm Command Expr Expr Statement
-    | ForkStm [Statement] deriving (Show)
-data Decla = Axiom [VarDec] Expr 
-    | Theorem [VarDec] Expr Statement
-    | Define Ident [VarDec] Expr Expr
-    | Predicate Ident Ident Expr [VarDec] Expr
-    | DataType Ident Expr 
-    | Undef Ident Expr (Maybe Expr)
-    | InfixDecla Bool Int Int Ident deriving (Show)
-data Reason = StepReason Rule AssignMap 
-    | ImplReason Rule AssignMap 
-    | EqualReason deriving (Show)
-
-type RuleMap = M.Map String [Rule]
-type Simplicity = [String] -- functions ordered by simplicity
-type TypeMap = M.Map String Expr
-type EntityMap = M.Map String Entity
-type LatexMap = M.Map String Expr
-type PredicateMap = M.Map String Expr
-data Context = Context { 
-    ctxOMap::OpeMap,
-    ctxTMap::TypeMap,
-    ctxSimps::Simplicity,
-    ctxSRule::RuleMap, 
-    ctxIRule::RuleMap,
-    ctxLatex::LatexMap,
-    ctxPred::PredicateMap,
-    ctxEnt::EntityMap }
-
+-- Analyzer Monad
 newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
 
 instance Functor Analyzer where
@@ -150,24 +64,169 @@ instance Monad Analyzer where
             (msg', ctx', x') = g ctx
         in  (msg ++ msg', ctx', x')
 
-onOpeMap:: (OpeMap -> b -> a) -> b -> Analyzer a
-onOpeMap = onCtx ctxOMap
+-- Lexial Data
+data Position = Position Int Int | NonePosition deriving (Show)
+initialPosition = Position 1 1
+stepChar (Position l c) n = Position l (c+n)
+nextChar (Position l c) = Position l (c+1)
+nextLine (Position l c) = Position (l+1) 1
 
-onCtx:: (Context -> c) -> (c -> b -> a) -> b -> Analyzer a
-onCtx selector f trg = do
+data PosToken = PosToken Position Token deriving (Show)
+
+data Message = Message Ident String
+instance Show Message where
+    show (Message id str) = "(" ++ show (idPos id) ++ ") " ++ str
+
+type OpeMap = M.Map String (Int, Int, Bool) -- (argument number, preceed, is left associative)
+
+-- Token
+data Token = IdentToken String 
+    | NumberToken Int 
+    | StringToken String 
+    | CharToken Char
+    | SymbolToken String 
+    | OperatorToken String
+    | Comma
+    | ParenOpen
+    | ParenClose
+    | EndToken deriving (Eq, Show)
+
+showToken:: Token -> String
+showToken (SymbolToken s) = s
+showToken (OperatorToken s) = s
+showToken (IdentToken s) = s
+showToken (NumberToken n) = show n
+showToken (StringToken s) = '"':s ++ "\""
+showToken (CharToken s) = ['\'', s, '\'']
+showToken Comma = ","
+showToken ParenOpen = "("
+showToken ParenClose = ")"
+
+data Ident = Ident { idPos::Position, idStr::String } deriving (Show)
+instance Eq Ident where
+    a == b = idStr a == idStr b
+
+data IdentInt = IdentInt { idNumPos::Position, idNum::Int } deriving (Show)
+instance Eq IdentInt where
+    a == b = idNum a == idNum b
+
+-- Expression
+data Expr = IdentExpr Ident
+    | FunExpr Ident [Expr]
+    | StringExpr Ident
+    | NumberExpr IdentInt deriving (Show)
+
+-- Formula
+data Formula = Formula { fomBody::FormulaBody, evalType::Formula }
+    | TypeOfType 
+    | Rewrite { reason::Reason, later::Formula, older::Formula } deriving (Eq, Show)
+
+data FormulaBody = FunTypeFormula { funTypeName::Ident, funArgTypes::[Formula], funRetType::Formula }
+    | ConstFormula Ident
+    | VarFormula Ident
+    | StringFormula Ident
+    | NumberFormula IdentInt
+    | FunFormula { funName::Ident, funArgs::[Formula] }
+    | CFunFormula { comName::Ident, comArgSet::(Formula, Formula) }
+    | ACFunFormula { acName::Ident, acRest::String, acArgs::[Formula] }deriving (Eq, Show)
+
+data Reason = StepReason Rule AssignMap 
+    | ImplReason Rule AssignMap 
+    | EqualReason deriving (Eq, Show)
+
+latestFormula:: Formula -> Formula
+latestFormula fom@Rewrite{} = later fom
+latestFormula fom = fom 
+
+oldestFormula:: Formula -> Formula
+oldestFormula fom@Rewrite{} = older fom
+oldestFormula fom = fom
+
+applyArgs:: (Formula -> Formula) -> Formula -> Formula
+applyArgs apply fom = applyArgs fom where
+    applyArgs:: Formula -> Formula
+    applyArgs (Formula fun@FunFormula{} etype) = Formula fun{funArgs=map apply $ funArgs fun} etype
+    applyArgs (Formula fun@CFunFormula{} etype) = Formula fun{comArgSet=let (a, b) = comArgSet fun in (apply a, apply b)} etype
+    applyArgs (Formula fun@ACFunFormula{} etype) = Formula fun{acArgs=map apply $ acArgs fun} etype
+    applyArgs _ = apply fom
+
+funIdent:: Formula -> Maybe Ident
+funIdent fom@Formula{} = funBodyIdent $ fomBody fom where
+    funBodyIdent:: FormulaBody -> Maybe Ident
+    funBodyIdent fun@FunTypeFormula{} = Just $ funName fun
+    funBodyIdent fun@CFunFormula{} = Just $ comName fun
+    funBodyIdent fun@ACFunFormula{} = Just $ acName fun
+    funBodyIdent _ = Nothing
+
+-- Rewriting
+type Rule = (Formula, Formula)
+type AssignMap = M.Map String Formula
+
+-- Program
+data Statement = SingleStm Command Expr
+    | BlockStm [Statement]
+    | AssumeStm Command Expr Expr Statement
+    | ForkStm [Statement] deriving (Show)
+
+data Decla = Axiom [VarDec] Expr 
+    | Theorem [VarDec] Expr Statement
+    | Define Ident [VarDec] Expr Expr
+    | Predicate Ident Ident Expr [VarDec] Expr
+    | DataType Ident Expr 
+    | Undef Ident Expr (Maybe Expr)
+    | InfixDecla Bool Int Int Ident deriving (Show)
+
+type VarDec = [(Ident, Expr)]
+data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
+data Command = StepCmd | ImplCmd | WrongCmd String deriving (Show)
+
+data Entity = Entity { entName::String, entType::Formula, entConst::Bool, entLatex::String } deriving (Show)
+    
+-- Context
+type RuleMap = M.Map String [Rule]
+type Simplicity = [String] -- functions ordered by simplicity
+type EntityMap = M.Map String Entity
+type LatexMap = M.Map String Formula
+type PredicateMap = M.Map String Formula
+
+data Context = Context { 
+    conOpe::OpeMap,
+    conList::Simplicity,
+    conSimp::RuleMap, 
+    conImpl::RuleMap,
+    conPred::PredicateMap,
+    conEnt::EntityMap }
+    
+newContext:: OpeMap -> Context
+newContext omap = Context { 
+        conOpe=omap,
+        conList=[],
+        conSimp=M.empty, 
+        conImpl=M.empty,
+        conPred=M.empty,
+        conEnt=buildInScope }
+    where
+    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex="" }
+    buildInTypes = ["Prop", "Char", "Type"]
+    buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
+
+-- Context Monad
+updateContext selector f = Analyzer $ ([], , ()) . f
+updateList f = Analyzer $ \ctx-> ([], ctx{conList=f $ conList ctx}, ())
+updateSimp f = Analyzer $ \ctx-> ([], ctx{conSimp=f $ conSimp ctx}, ())
+updateImpl f = Analyzer $ \ctx-> ([], ctx{conImpl=f $ conImpl ctx}, ())
+updateEnt f = Analyzer $ \ctx-> ([], ctx{conEnt=f $ conEnt ctx}, ())
+
+onContext:: (Context -> c) -> (c -> b -> a) -> b -> Analyzer a
+onContext selector f trg = do
     omap <- fmap selector getContext
     return $ f omap trg
 
 getContext:: Analyzer Context
 getContext = Analyzer $ \ctx -> ([], ctx, ctx)
 
-updateContext selector f = Analyzer $ ([], , ()) . f
-
-updateSRule f = Analyzer $ \ctx-> ([], ctx{ctxSRule=f $ ctxSRule ctx}, ())
-updateIRule f = Analyzer $ \ctx-> ([], ctx{ctxIRule=f $ ctxIRule ctx}, ())
-updateSimp f = Analyzer $ \ctx-> ([], ctx{ctxSimps=f $ ctxSimps ctx}, ())
-updateScope f = Analyzer $ \ctx-> ([], ctx{ctxTMap=f $ ctxTMap ctx}, ())
-updateLatex f = Analyzer $ \ctx-> ([], ctx{ctxTMap=f $ ctxLatex ctx}, ())
+onOpeMap:: (OpeMap -> b -> a) -> b -> Analyzer a
+onOpeMap = onContext conOpe
 
 analyzeErrorM:: Ident -> String -> Analyzer (Maybe a)
 analyzeErrorM ps str = Analyzer ([Message ps str], , Nothing)
@@ -176,7 +235,12 @@ analyzeErrorB ps str = Analyzer ([Message ps str], , False)
 analyzeError:: Ident -> String -> Analyzer ()
 analyzeError ps str = Analyzer ([Message ps str], , ())
 
+-- Context Accesser
+insertEnt:: Bool -> Ident -> Formula -> Analyzer ()
+insertEnt const id _type = updateEnt $ M.insert (show id) 
+    (Entity { entName=show id, entType=_type, entConst=const, entLatex="" })
+
 lookupEnt:: String -> Analyzer (Maybe Entity)
 lookupEnt str = do
-    emap <- fmap ctxEnt getContext
+    emap <- fmap conEnt getContext
     return $ M.lookup str emap
