@@ -26,18 +26,12 @@ isCommutative (FunExpr f [FunExpr g [IdentExpr a, IdentExpr b], IdentExpr c],
     all (==f) [g, h, i] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
 isCommutative _ = False
 
-
 simplifyM = onCtx ctxSRule simplify
 derivateM = onCtx ctxIRule derivate
 
 buildFormula:: Expr -> Analyzer (Maybe Formula)
-buildFormula (NumberExpr num) = do
-    ntype <- lookupEnt "N"
-    return $ Just $ Formula (NumberFormula num) ntype
-
-buildFormula (StringExpr str) = do
-    stype <- lookupEnt "String"
-    return $ Just $ Formula (StringFormula str) stype
+buildFormula (NumberExpr num) = return $ Just $ Formula (NumFormula num) (makeTypeFormula "N")
+buildFormula (StringExpr str) = return $ Just $ Formula (StrFormula str) (makeTypeFormula "String")
 
 buildFormula (IdentExpr id@(Ident pos var)) = do
     ment <- lookupEnt var
@@ -48,8 +42,8 @@ buildFormula (FunExpr id@(Ident pos ">>=") [a, b]) = do
     ma <- buildFormula a
     mb <- buildFormula b
     case (ma, mb) of
-        (Just na, Just nb) -> if evalType na `equals` evalType nb 
-            then return $ Just $ FunFormula (StringIdent pos ">>=") [na, nb]
+        (Just na, Just nb) -> if evalType na == evalType nb 
+            then return $ Just $ FunFormula (Ident pos ">>=") [na, nb]
             else analyzeErrorM id "Not match type"
         _ -> return Nothing
 

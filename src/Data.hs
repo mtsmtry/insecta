@@ -121,18 +121,21 @@ data Formula = Formula { fomBody::FormulaBody, evalType::Formula }
     | TypeOfType 
     | Rewrite { reason::Reason, later::Formula, older::Formula } deriving (Eq, Show)
 
+data FunType = OFun | CFun | ACFun String deriving (Eq, Show)
+
 data FormulaBody = FunTypeFormula { funTypeName::Ident, funArgTypes::[Formula], funRetType::Formula }
-    | ConstFormula Ident
+    | FunFormula { funType::FunType, funName::Ident, funArgs::[Formula] } 
+    | CstFormula Ident
     | VarFormula Ident
-    | StringFormula Ident
-    | NumberFormula IdentInt
-    | FunFormula { funName::Ident, funArgs::[Formula] }
-    | CFunFormula { comName::Ident, comArgSet::(Formula, Formula) }
-    | ACFunFormula { acName::Ident, acRest::String, acArgs::[Formula] }deriving (Eq, Show)
+    | StrFormula Ident
+    | NumFormula Int deriving (Eq, Show)
 
 data Reason = StepReason Rule AssignMap 
     | ImplReason Rule AssignMap 
     | EqualReason deriving (Eq, Show)
+
+makeTypeFormula:: String -> Formula
+makeTypeFormula str = Formula (CstFormula $ Ident NonePosition str) TypeOfType
 
 latestFormula:: Formula -> Formula
 latestFormula fom@Rewrite{} = later fom
@@ -146,17 +149,16 @@ applyArgs:: (Formula -> Formula) -> Formula -> Formula
 applyArgs apply fom = applyArgs fom where
     applyArgs:: Formula -> Formula
     applyArgs (Formula fun@FunFormula{} etype) = Formula fun{funArgs=map apply $ funArgs fun} etype
-    applyArgs (Formula fun@CFunFormula{} etype) = Formula fun{comArgSet=let (a, b) = comArgSet fun in (apply a, apply b)} etype
-    applyArgs (Formula fun@ACFunFormula{} etype) = Formula fun{acArgs=map apply $ acArgs fun} etype
     applyArgs _ = apply fom
 
 funIdent:: Formula -> Maybe Ident
 funIdent fom@Formula{} = funBodyIdent $ fomBody fom where
     funBodyIdent:: FormulaBody -> Maybe Ident
     funBodyIdent fun@FunTypeFormula{} = Just $ funName fun
-    funBodyIdent fun@CFunFormula{} = Just $ comName fun
-    funBodyIdent fun@ACFunFormula{} = Just $ acName fun
     funBodyIdent _ = Nothing
+
+changeArgs:: Formula -> [Formula] -> Formula
+changeArgs (Formula (FunFormula ftype id _) etype) args = (Formula (FunFormula ftype id args) etype)
 
 -- Rewriting
 type Rule = (Formula, Formula)
@@ -178,7 +180,7 @@ data Decla = Axiom [VarDec] Expr
 
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
-data Command = StepCmd | ImplCmd | WrongCmd String deriving (Show)
+data Command = StepCmd | ImplCmd | UnfoldCmd | WrongCmd String deriving (Show)
 
 data Entity = Entity { entName::String, entType::Formula, entConst::Bool, entLatex::String } deriving (Show)
     
