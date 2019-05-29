@@ -1,4 +1,4 @@
-module Rewriter(unify, assign, simplify, derivate, insertSimp, mergeRewrite) where
+module Rewriter(unify, assign, simplify, derivate, derivateUnfold, derivateExists, insertSimp, mergeRewrite) where
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -125,12 +125,15 @@ simplify simps m e = maybe e (simplify simps m) $ step e where
     applyByHeadList [] _ = Nothing
     applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList xs e
 
-applyDiff:: Derivater -> (Fom, Fom) -> Maybe Fom
+type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
+applyDiff:: Derivater -> (Fom, Fom) -> Analyzer (Maybe Fom)
 applyDiff derivater pair@(fun@(FunFom _ ty f as), FunFom _ ty' g bs) = if f == g && length as == length bs
     then case num of
-        0 -> Nothing
-        1 -> derivate m x >>= \t-> Just $ fun{funArgs=map snd xs' ++ t:map snd xs} where
-            (xs', x:xs) = splitAt idx args
+        0 -> return Nothing
+        1 -> do
+            let (xs', x:xs) = splitAt idx args
+            res <- derivater x
+            return $ (\t-> fun{funArgs=map snd xs' ++ t:map snd xs}) <$> res
         _ -> derivater pair
     else derivater pair where
         args = zip as bs
@@ -143,22 +146,64 @@ applyDiff derivater pair@(fun@(FunFom _ ty f as), FunFom _ ty' g bs) = if f == g
             encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
             encount' p _ [] = p
 
-type Derivater = (Fom, Fom) -> Maybe Fom
-derivate:: RuleMap -> Derivater
-derivate m = applyDiff derivateByRuleList where
-    applyDiff d pair = d pair
-
+derivate:: Derivater
+derivate = applyDiff derivateByRuleList where
     derivateByRuleList:: Derivater
-    derivateByRuleList pair@(FunFom _ h ty as, goal) = M.lookup (show h) m 
-        >>= foldr ((<|>) . flip derivateByRule pair) Nothing
-    derivateByRuleList _ = Nothing
-
+    derivateByRuleList pair@(FunFom _ h ty as, goal) = do
+        rmap <- fmap conImpl getContext
+        let mRules = M.lookup (idStr h) rmap
+        case mRules of
+            Just rules -> derivateByRules rules pair
+                where
+                derivateByRules:: [Rule] -> Derivater
+                derivateByRules [] pair = return Nothing
+                derivateByRules (x:xs) pair = do
+                    a <- derivateByRule x pair
+                    b <- derivateByRules xs pair
+                    return $ a <|> b
+            Nothing -> return Nothing
+    derivateByRuleList _ = return Nothing
     derivateByRule:: Rule -> Derivater
     derivateByRule d = applyDiff $ derivate' d where
         derivate':: Rule -> Derivater
-        derivate' rule (begin, goal) = unify (ruleBf rule) begin >>= \asg-> if assign asg (ruleAf rule) == goal 
-            then Just $ Rewrite (NormalReason rule asg) goal begin
-            else Nothing
+        derivate' rule (begin, goal) = do
+            let mAsg = unify (ruleBf rule) begin
+            case mAsg of
+                Just asg -> return $ if assign asg (ruleAf rule) == goal 
+                    then Just $ Rewrite (NormalReason rule asg) goal begin
+                    else Nothing
+                Nothing -> return Nothing
+
+derivateExists:: Derivater
+derivateExists = applyDiff derivateExists where
+    contains:: Eq a => [a] -> [a] -> Bool
+    contains [] _ = True
+    contains (x:xs) set = x `elem` set && contains xs set
+    derivateExists:: Derivater
+    derivateExists (fom, var@(VarFom id varTy)) = do
+        vmap <- fmap conVar getContext 
+        case M.lookup (idStr id) vmap of
+            (Just (Variable (Exists refs) ty)) -> if ty == varTy && contains ids refs 
+                then return $ Just var
+                else return Nothing
+            _ -> return $ if fom == var then Just var else Nothing
+        where
+        ids = lookupVars fom
+    derivateExists (_, goal) = return $ Just goal
+
+derivateUnfold:: Derivater
+derivateUnfold = applyDiff unfold where
+    unfold:: Derivater
+    unfold (trg@(VarFom id UnknownFom), VarFom _ ty) = do
+        insertEnt False id ty
+        return $ Just trg
+    unfold (trg@(VarFom _ trgTy), VarFom _ defTy) = return $ if trgTy == defTy then Just trg else Nothing
+    unfold (trg@FunFom{}, def@FunFom{}) = if funName trg == funName def
+        then do
+            mArgs <- mapM unfold $ zip (funArgs trg) (funArgs def)
+            return $ maybe Nothing (\args-> Just trg{funArgs=args}) $ conjMaybe mArgs
+        else return Nothing
+    unfold (trg, def) = return $ if trg == def then Just trg else Nothing
 
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
@@ -182,3 +227,8 @@ mergeRewrite = mergeRewrite Nothing where
     appendStep:: Reason -> Fom -> Fom -> Fom
     appendStep r' t (Rewrite r a b) = Rewrite r a (appendStep r' t b)
     appendStep r t u = Rewrite r u t
+
+lookupVars:: Fom -> [Ident]
+lookupVars fun@FunFom{} = concatMap lookupVars $ funArgs fun
+lookupVars (VarFom id _) = [id]
+lookupVars _ = []

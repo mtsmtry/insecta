@@ -46,48 +46,59 @@ derivateM pair = do
     impl <- fmap conImpl getContext
     return $ derivate impl pair
 
-buildFom:: Expr -> Analyzer (Maybe Fom)
-buildFom (NumExpr num) = return $ Just $ NumFom num
-buildFom (StrExpr str) = return $ Just $ StrFom str
+data BuildFomOption = AllowUndefined | NotAllowUndefined
 
-buildFom (IdentExpr id) = do
-    mEnt <- lookupEnt $ idStr id
-    maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent->
-        return $ Just $ VarFom id (entType ent)
+buildFom = buildFomEx NotAllowUndefined
 
-buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
-    mArgs <- mapM buildFom (extractFromTuple arg)
-    mRet <- buildFom ret
-    return $ FunTypeFom id <$> (conjMaybe mArgs) <*> mRet
-    where
-    extractFromTuple:: Expr -> [Expr]
-    extractFromTuple (FunExpr (Ident _ "tuple") args) = args
-    extractFromTuple fom = [fom]
+buildFomEx:: BuildFomOption -> Expr -> Analyzer (Maybe Fom)
+buildFomEx opt = buildFom where
+    buildFom:: Expr -> Analyzer (Maybe Fom)
+    buildFom (NumExpr num) = return $ Just $ NumFom num
+    buildFom (StrExpr str) = return $ Just $ StrFom str
 
-buildFom e@(FunExpr id@(Ident pos fun) args) = do
-    mEnt <- lookupEnt fun
-    mArgs <- mapM buildFom args
-    maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent-> do
-        let ty = entType ent
-        checkFunc ty mArgs
-        return $ FunFom OFun id ty <$> (conjMaybe mArgs)
-    where
-    checkFunc:: Fom -> [Maybe Fom] -> Analyzer Bool
-    checkFunc (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
-        then analyzeErrorB id "Argument number wrong"
-        else do
-            mapM_ (uncurry checkType) $ zip argVls argTys
-            return False
-    checkFunc _ _ = analyzeErrorB id $ "Not function:" ++ idStr id
-    checkType:: Maybe Fom -> Fom -> Analyzer ()
-    checkType (Just vl) ty = let vlTy = evalType vl in unless (vlTy == ty) $ do
-        eStr <- onOpeMap showFom vlTy
-        aStr <- onOpeMap showFom ty
-        let msg = "Couldn't match expected type '" ++ eStr ++ "' with actual type '" ++ aStr ++ "'"
-        analyzeError (showIdent vl) msg
-    checkType _ _ = return ()
-    
-buildFom e = return Nothing -- error $ "Wrong pattern:" ++ show e 
+    buildFom (IdentExpr id) = do
+        mEnt <- lookupEnt $ idStr id
+        case mEnt of
+            Just ent -> if entConst ent 
+                then return $ Just $ CstFom id (entType ent)
+                else return $ Just $ VarFom id (entType ent)
+            Nothing -> if opt == AllowUndefined
+                then return $ Just $ CstFom id UnknownFom
+                else analyzeErrorM id "Not defined"
+
+    buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
+        mArgs <- mapM buildFom (extractFromTuple arg)
+        mRet <- buildFom ret
+        return $ FunTypeFom id <$> (conjMaybe mArgs) <*> mRet
+        where
+        extractFromTuple:: Expr -> [Expr]
+        extractFromTuple (FunExpr (Ident _ "tuple") args) = args
+        extractFromTuple fom = [fom]
+
+    buildFom e@(FunExpr id@(Ident pos fun) args) = do
+        mEnt <- lookupEnt fun
+        mArgs <- mapM buildFom args
+        maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent-> do
+            let ty = entType ent
+            checkFunc ty mArgs
+            return $ FunFom OFun id ty <$> (conjMaybe mArgs)
+        where
+        checkFunc:: Fom -> [Maybe Fom] -> Analyzer Bool
+        checkFunc (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
+            then analyzeErrorB id "Argument number wrong"
+            else do
+                mapM_ (uncurry checkType) $ zip argVls argTys
+                return False
+        checkFunc _ _ = analyzeErrorB id $ "Not function:" ++ idStr id
+        checkType:: Maybe Fom -> Fom -> Analyzer ()
+        checkType (Just vl) ty = let vlTy = evalType vl in unless (vlTy == ty || vlTy == UnknownFom) $ do
+            eStr <- onOpeMap showFom vlTy
+            aStr <- onOpeMap showFom ty
+            let msg = "Couldn't match expected type '" ++ eStr ++ "' with actual type '" ++ aStr ++ "'"
+            analyzeError (showIdent vl) msg
+        checkType _ _ = return ()
+        
+    buildFom _ = return Nothing -- error $ "Wrong pattern:" ++ show e 
 
 getLabel:: Maybe Fom -> Maybe String
 getLabel (Just fun@FunFom{}) = Just $ idStr $ funName fun
@@ -198,6 +209,16 @@ buildProofEnv stms = do
     proof <- buildProof stms
     vmap <- fmap conVar getContext
     return $ ProofEnv proof vmap
+
+analyzeProofOrigin:: ProofOrigin
+analyzeProofOrigin (ProofOriginTrg (ProofTrgContext con)) = do
+    let props = extractArgs "&" con 
+    preds <- mapM checkCon props
+    
+    where
+    checkCon:: Fom -> Analyzer (Maybe (Ident, Fom))
+    checkCon (PredFom pred ty) = return $ Jsut (pred, ty)
+    checkCon fom = analyzeError (showIdent fom) "Not pred"
 
 analyzeProofRewrite:: Fom -> ProofRewrite -> Analyzer Fom
 analyzeProofRewrite trg (CmdProof StepProofCmd goal) = do

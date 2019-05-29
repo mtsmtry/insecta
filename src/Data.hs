@@ -126,12 +126,14 @@ showExprIdent (NumExpr (IdentInt pos num)) = Ident pos (show num)
 data FunAttr = OFun | CFun | ACFun String deriving (Eq, Show)
 
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
+    | PredFom { predTrg::Ident, predType::Fom }
     | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] } 
     | CstFom { cstName::Ident, cstType::Fom }
     | VarFom { varName::Ident, varType::Fom }
     | StrFom Ident
     | NumFom IdentInt
     | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
+    | UnknownFom
     | TypeOfType deriving (Eq, Show)
 
 data Reason = NormalReason Rule AssignMap 
@@ -197,7 +199,9 @@ data Decla = Axiom [VarDec] Expr
 
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
-data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::String } deriving (Show)
+
+data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::String }
+    | PredicateEntity { predSelf::String, predExtend::Fom, predDef::Fom }  deriving (Show)
     
 data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Show)
 data IdentCmd = IdentCmd Ident Command deriving (Show)
@@ -209,7 +213,7 @@ data Statement = CmdStm IdentCmd Expr
     | ForAllStm Ident Expr deriving (Show)
 
 data ProofCmd = StepProofCmd | ImplProofCmd | UnfoldProofCmd | WrongProofCmd
-data ProofTrg = ProofTrgLeft | ProofTrgContext
+data ProofTrg = ProofTrgLeft | ProofTrgContext Fom
 data ProofOrigin = ProofOriginFom Fom | ProofOriginTrg ProofTrg | ProofOriginWrong
 data ProofRewrite = CmdProof ProofCmd Fom | AssumeProof ProofCmd Fom Proof | ForkProof [(ProofCmd, Proof)] | WrongProof
 data Proof = Proof ProofOrigin [ProofRewrite]
@@ -224,7 +228,6 @@ type RuleMap = M.Map String [Rule]
 type Simplicity = [String] -- functions ordered by simplicity
 type EntityMap = M.Map String Entity
 type LatexMap = M.Map String Fom
-type PredicateMap = M.Map String Fom
 
 data Context = Context { 
     conVar::VarMap,
@@ -232,7 +235,6 @@ data Context = Context {
     conList::Simplicity,
     conSimp::RuleMap, 
     conImpl::RuleMap,
-    conPred::PredicateMap,
     conEnt::EntityMap }
     
 newContext:: OpeMap -> Context
@@ -242,7 +244,6 @@ newContext omap = Context {
         conList=[],
         conSimp=M.empty, 
         conImpl=M.empty,
-        conPred=M.empty,
         conEnt=buildInScope }
     where
     buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex="" }
