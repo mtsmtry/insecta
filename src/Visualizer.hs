@@ -13,82 +13,77 @@ import Control.Applicative
 import Library
 import Data
 
-data RewriteList = RewriteExpr Expr | RewriteList Reason Expr RewriteList
+data RewriteList = RewriteFom Fom | RewriteList Reason Fom RewriteList
+
+showRule:: OpeMap -> Rule -> String
+showRule opem rule = showFom opem (ruleBf rule) ++ kind ++ showFom opem (ruleAf rule) where
+    kind = case ruleKind rule of SimpRule -> " >>= "; ImplRule -> " => "
 
 showReason:: OpeMap -> Reason -> String
-showReason omap (StepReason (a, b) asg) = showExpr omap a ++ " >>= " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
-showReason omap (ImplReason (a, b) asg) = showExpr omap a ++ " -> " ++ showExpr omap b ++ " " ++ toJsonWith (showExpr omap) asg
-showReason omap EqualReason = ""
+showReason opem (NormalReason rule asg) = showRule opem rule ++ toJsonWith (showFom opem) asg
+showReason opem EqualReason = ""
 
-toRewriteList:: OpeMap -> Expr -> RewriteList
-toRewriteList omap (FuncExpr f as) = build args [] where
-    oldest (RewriteExpr e) = e
+toRewriteList:: OpeMap -> Fom -> RewriteList
+toRewriteList opem fun@FunFom{}  = build args [] where
+    oldest (RewriteFom fom) = fom
     oldest (RewriteList _ _ rest) = oldest rest
-    args = map (toRewriteList omap) as
-    build:: [RewriteList] -> [Expr] -> RewriteList
-    build [] args = RewriteExpr $ FuncExpr f args
-    build (RewriteExpr e:sargs) args = build sargs (e:args)
-    build (RewriteList r old rest:sargs) args = RewriteList r (FuncExpr f (old:map oldest sargs ++ args)) (build (rest:sargs) args)
-toRewriteList omap (Rewrite r a b) = add r blist alist where
-    alist = toRewriteList omap a
-    blist = toRewriteList omap b
+    args = map (toRewriteList opem) (funArgs fun)
+    build:: [RewriteList] -> [Fom] -> RewriteList
+    build [] args = RewriteFom fun{funArgs=args}
+    build (RewriteFom e:sargs) args = build sargs (e:args)
+    build (RewriteList r old rest:sargs) args = RewriteList r fun{funArgs=(old:map oldest sargs ++ args)} (build (rest:sargs) args)
+toRewriteList opem (Rewrite r a b) = add r blist alist where
+    alist = toRewriteList opem a
+    blist = toRewriteList opem b
     add:: Reason -> RewriteList -> RewriteList -> RewriteList
     add ar (RewriteList r e rest) trg = add ar rest $ RewriteList r e trg
-    add ar (RewriteExpr e) trg = RewriteList ar e trg
-toRewriteList omap e = RewriteExpr e
+    add ar (RewriteFom fom) trg = RewriteList ar fom trg
+toRewriteList opem e = RewriteFom e
 
 showRewriteList:: OpeMap -> RewriteList -> String
-showRewriteList omap (RewriteExpr e) = showOldestExpr omap e
-showRewriteList omap (RewriteList r e rest) = showOldestExpr omap e
-                                            ++ " [" ++ showReason omap r ++ "]" ++ "\n"
-                                            ++ showRewriteList omap rest
+showRewriteList opem (RewriteFom e) = showOldestFom opem e
+showRewriteList opem (RewriteList r e rest) = showOldestFom opem e
+                                            ++ " [" ++ showReason opem r ++ "]" ++ "\n"
+                                            ++ showRewriteList opem rest
 
-showFuncExpr:: OpeMap -> (OpeMap -> Expr -> String) -> String -> [Expr]-> String
-showFuncExpr omap fshow "tuple" as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
-showFuncExpr omap fshow f as
-    | not (isAlpha (head f)) && length as == 2 = let [a, b] = as; (former, latter) = (bshow a, bshow b) in case b of 
-        (FuncExpr g _)-> if isAlpha (head $ show g) 
-            then former ++ f ++ latter
-            else former ++ f ++ "(" ++ latter ++ ")"
-        _ -> former ++ f ++ latter
-    | not (isAlpha (head f)) && length as == 1 = let arg = bshow (head as) in case head as of
-        e@(FuncExpr g _) -> if isAlpha (head $ show g) || head (show g) == '(' 
-            then f ++ arg 
-            else f ++ "(" ++ arg ++ ")"
-        _ -> f ++ arg
-    | otherwise = f ++ "(" ++ intercalate ", " (map (fshow omap) as) ++ ")" where
-        getPre h = maybe 100 (\(_, x, _)-> x) $ M.lookup h omap
-        bshow e@(FuncExpr g as) = if length (show g) == 2 && getPre f > getPre (show g) 
-            then "(" ++ fshow omap e ++ ")" 
-            else fshow omap e
-        bshow e = fshow omap e
+showFunFom:: OpeMap -> (OpeMap -> Fom -> String) -> String -> [Fom]-> String
+showFunFom opem fshow "tuple" as = "(" ++ intercalate ", " (map (fshow opem) as) ++ ")"
+showFunFom opem fshow f args = if isAlpha (head f) 
+    then f ++ "(" ++ intercalate ", " (map (fshow opem) args) ++ ")"
+    else case args of
+        [unary] -> f ++ fshow opem unary
+        _ -> intercalate f (map (fshow opem) args)
+    where
+    getPre h = maybe 100 (\(_, x, _)-> x) $ M.lookup h opem
+    bshow fun@FunFom{} = let g = idStr $ funName fun in if length (show g) == 2 && getPre f > getPre (show g) 
+        then "(" ++ fshow opem fun ++ ")" 
+        else fshow opem fun
+    bshow fom = fshow opem fom
 
-showExpr:: OpeMap -> Expr -> String
-showExpr omap (Rewrite _ a b) = "[" ++ showExpr omap a ++ ", " ++ showExpr omap b ++ "]"  -- error "Can not use Rewrite"
-showExpr omap (StringExpr str) = "\"" ++ show str ++ "\"" 
-showExpr omap (IdentExpr id) = show id
-showExpr omap (NumberExpr _ n) = show n
-showExpr omap (FuncExpr f as) = showFuncExpr omap showExpr (show f) as
+showFom:: OpeMap -> Fom -> String
+showFom opem (StrFom id) = "\"" ++ idStr id ++ "\"" 
+showFom opem (NumFom (IdentInt _ num)) = show num
+showFom opem (VarFom id _) = idStr id
+showFom opem (CstFom id _) = idStr id
+showFom opem fun@FunFom{} = showFunFom opem showFom (idStr $ funName fun) (funArgs fun)
+showFom opem rew@Rewrite{} = "[" ++ showFom opem (rewOlder rew) ++ ", " ++ showFom opem (rewLater rew) ++ "]"
 
-showLatestExpr omap (Rewrite _ a _) = showLatestExpr omap a
-showLatestExpr omap (FuncExpr f as) = showFuncExpr omap showLatestExpr (show f) as
-showLatestExpr omap e = showExpr omap e
+showLatestFom opem rew@Rewrite{} = showLatestFom opem (rewLater rew)
+showLatestFom opem fun@FunFom{} = showFunFom opem showLatestFom (idStr $ funName fun) (funArgs fun)
+showLatestFom opem e = showFom opem e
 
-showOldestExpr omap (Rewrite _ _ b) = showLatestExpr omap b
-showOldestExpr omap (FuncExpr f as) = showFuncExpr omap showOldestExpr (show f) as
-showOldestExpr omap e = showExpr omap e
+showOldestFom opem rew@Rewrite{} = showOldestFom opem (rewOlder rew)
+showOldestFom opem fun@FunFom{} = showFunFom opem showOldestFom (idStr $ funName fun) (funArgs fun)
+showOldestFom opem e = showFom opem e
 
-showCodeExpr:: OpeMap -> Expr -> Ident
-showCodeExpr omap e =  StringIdent (toPos $ showIdent e) $ showOldestExpr omap e 
-
-showExprAsRewrites:: OpeMap -> Expr -> String
-showExprAsRewrites omap e@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
-    steps = map (showExprAsRewrites omap) $ expandRewrite e
-    expandRewrite:: Expr -> [Expr]
+showFomAsRewrites:: OpeMap -> Fom -> String
+showFomAsRewrites opem rew@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" where
+    steps = map (showFomAsRewrites opem) $ expandRewrite rew
+    expandRewrite:: Fom -> [Fom]
     expandRewrite (Rewrite e a b) = expandRewrite b ++ expandRewrite a
     expandRewrite e = [e]
-showExprAsRewrites omap (FuncExpr h as) = showFuncExpr omap showExprAsRewrites (show h) as
-showExprAsRewrites omap e = showExpr omap e
+showFomAsRewrites opem fun@FunFom{} = showFunFom opem showFomAsRewrites (idStr $ funName fun) (funArgs fun)
+showFomAsRewrites opem fom = showFom opem fom
 
 evalString:: Expr -> String
 evalString e = ""

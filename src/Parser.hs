@@ -69,7 +69,7 @@ parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
     parseExpr:: [PosToken] -> [(PosToken, Int)] -> [Expr] -> ([Message], [PosToken], Maybe Expr)
     parseExpr [] s q = ([], [], Just $ head $ makeExpr s q)
     parseExpr all@(px@(PosToken pos x):xs) s q = case x of
-        NumberToken n   -> maybeEnd $ parseExpr xs s (NumberExpr (IdentInt pos n):q)
+        NumberToken n   -> maybeEnd $ parseExpr xs s (NumExpr (IdentInt pos n):q)
         IdentToken id   -> maybeEnd $ case xs of
             (po@(PosToken _ ParenOpen):xs')-> parseExpr xs' ((po, 2):(px, 1):s) q
             _-> parseExpr xs s (IdentExpr (Ident pos id):q)
@@ -183,42 +183,28 @@ parseCommaSeparated = parseSeparated $ parseToken Comma
 parseVarDecSet:: OpeMap -> Parser (Maybe VarDecSet)
 parseVarDecSet omap = return (Just VarDecSet) <&&> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
--- [proof] = [command] [expr] [command] [expr]
+parseMultiLineStm:: OpeMap -> Parser (Maybe [IdentStm])
+parseMultiLineStm omap = Just <$> parseSequence (parseStatement omap)
 
--- [proof]
--- [command] assume [expr] {
---     being [expr]
---     [multi-proof]
--- }
-
--- [proof]
--- fork [proof]
--- fork [proof]
-
-makeParser f = return $ Just ([], f)
-
-parseMultiLineStm:: OpeMap -> Parser (Maybe Statement)
-parseMultiLineStm omap = return (Just BlockStm) <&&> parseSequence (parseStatement omap)
-
-parseStatement:: OpeMap -> Parser (Maybe Statement)
-parseStatement omap = parseSymbol "{" >>= \case 
-    Just{} -> parseBlock
-    Nothing -> parseSingleStm
+parseStatement:: OpeMap -> Parser (Maybe IdentStm)
+parseStatement omap = parseCmd >>= \case
+    Just idCmd@(IdentCmd id _) -> parseIdent >>= ((fmap $ IdentStm id) <$> ) . \case
+        Just (Ident _ "assume") -> return (Just $ AssumeStm idCmd)
+            <++> parseExpr omap <::> parseSymbol "{"
+            <++> parseBlock <::> parseSymbol "}"
+        _ -> return (Just $ CmdStm idCmd) <++> parseExpr omap
+    Nothing -> return Nothing
     where
+    parseCmd:: Parser (Maybe IdentCmd)
     parseCmd = parseIdent >>= \case
-        Just (Ident _ "step") -> return $ Just StepCmd
-        Just (Ident _ "impl") -> return $ Just ImplCmd
-        Just (Ident _ s) -> return $ Just $ WrongCmd s
+        Just id@(Ident _ "step") -> return $ Just $ IdentCmd id StepCmd
+        Just id@(Ident _ "impl") -> return $ Just $ IdentCmd id ImplCmd
+        Just id@(Ident _ "begin") -> return $ Just $ IdentCmd id BeginCmd
+        Just id@(Ident _ "target") -> return $ Just $ IdentCmd id TargetCmd
+        Just id@Ident{} -> return $ Just $ IdentCmd id WrongCmd
         Nothing -> return Nothing
-    parseBlock = return (Just BlockStm) <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
-    parseSingleStm = parseCmd >>= \case
-        Just cmd -> parseIdent >>= \case
-            Just (Ident _ "assume") -> return (Just $ AssumeStm cmd)
-                <++> parseExpr omap <::> parseSymbol "{"
-                <::> parseToken (IdentToken "begin") <++> parseExpr omap 
-                <++> parseMultiLineStm omap <::> parseSymbol "}"
-            _ -> return (Just $ SingleStm cmd) <++> parseExpr omap
-        Nothing -> return Nothing
+    parseBlock:: Parser (Maybe [IdentStm])
+    parseBlock = return (Just id) <::> parseSymbol "{" <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
 
 parseVarDecs:: OpeMap -> Parser (Maybe VarDec)
 parseVarDecs omap = fmap (Just . conv) parse

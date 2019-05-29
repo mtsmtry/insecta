@@ -13,152 +13,215 @@ import Library
 import Parser
 import Rewriter
 import Data
--- import Visualizer
+import Visualizer
 
-isAssociative:: Rule -> Bool
-isAssociative (FunExpr f [IdentExpr a, IdentExpr b], FunExpr g [IdentExpr p, IdentExpr q]) = 
-    f == g && a == q && b == p
-isAssociative _ = False
+isAssociative:: Fom -> Fom -> Bool
+isAssociative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
+    ([a, b], [c, d]) -> funName bf == funName af && a == c && b == d
+    _ -> False
+isAssociative _ _ = False
 
-isCommutative:: Rule -> Bool
-isCommutative (FunExpr f [FunExpr g [IdentExpr a, IdentExpr b], IdentExpr c], 
-               FunExpr h [IdentExpr x, FunExpr i [IdentExpr y, IdentExpr z]]) = 
-    all (==f) [g, h, i] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
-isCommutative _ = False
-
-simplifyM = onCtx ctxSRule simplify
-derivateM = onCtx ctxIRule derivate
-
-buildFormula:: Expr -> Analyzer (Maybe Formula)
-buildFormula (NumberExpr num) = return $ Just $ Formula (NumFormula num) (makeTypeFormula "N")
-buildFormula (StringExpr str) = return $ Just $ Formula (StrFormula str) (makeTypeFormula "String")
-
-buildFormula (IdentExpr id@(Ident pos var)) = do
-    ment <- lookupEnt var
-    maybeFlip ment (analyzeErrorM id "Not defined") $ \ent->
-        return $ Just $ VarFormula (EntityIdent pos ent)
-
-buildFormula (FunExpr id@(Ident pos ">>=") [a, b]) = do
-    ma <- buildFormula a
-    mb <- buildFormula b
-    case (ma, mb) of
-        (Just na, Just nb) -> if evalType na == evalType nb 
-            then return $ Just $ FunFormula (Ident pos ">>=") [na, nb]
-            else analyzeErrorM id "Not match type"
-        _ -> return Nothing
-
-buildFormula (FunExpr (Ident pos "->") [a, b]) = do
-    margs <- conjMaybe <$> mapM buildFormula (extractFormulasFromTuple a)
-    mret <- buildFormula b
-    case (margs, mret) of
-        (Just args, Just ret) -> return $ Just $ FunFormula (FuncTypeIdent pos) [FunFormula (StringIdent NonePosition "tuple") args, ret]
-        _ -> return Nothing
-
-buildFormula e@(FunExpr id@(Ident pos fun) args) = do
-    ment <- lookupEnt fun
-    margs <- mapM buildFormula args
-    maybeFlip ment (analyzeErrorM id "Not defined") $ \ent-> do
-        checkFunc (tFormula ent) margs
-        case conjMaybe margs of
-            Just nargs -> return $ Just $ FunFormula (EntityIdent pos ent) nargs
-            Nothing -> return Nothing
+isCommutative:: Fom -> Fom -> Bool
+isCommutative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
+    ([f@FunFom{}, c], [x, g@FunFom{}]) -> case (funArgs f, funArgs g) of
+        ([a, b], [y, z]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
+        _ -> False
+    ([a, f@FunFom{}], [g@FunFom{}, z]) -> case (funArgs f, funArgs g) of
+        ([b, c], [x, y]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
+        _ -> False
+    _ -> False
     where
-    checkFunc:: Formula -> [Maybe Formula] -> Analyzer Bool
-    checkFunc (FunFormula f@(Ident _ _) [defArg, ret]) inputArgs = do
-        let typeArgs = extractFormulasFromTuple defArg
-        if length typeArgs /= length inputArgs
-            then analyzeErrorB f "Argument number wrong"
-            else do
-                mapM_ (uncurry checkType) $ zip inputArgs typeArgs
-                return False
-    checkFunc e _ = do
-        ps <- onOpeMap showCodeFormula e
-        analyzeErrorB ps $ "Not function:" ++ show ps
-    checkType:: Maybe Formula -> Formula -> Analyzer ()
-    checkType (Just value) def = let input = evalType value in unless (input == def) $ do
-        vstr <- onOpeMap showFormula input
-        tstr <- onOpeMap showFormula def
-        let msg = "Couldn't match expected type '" ++ vstr ++ "' with actual type '" ++ tstr ++ "'"
-        analyzeError (showIdent value) msg
+    sameName:: [Fom] -> Bool
+    sameName (x:xs) = let name = funName x in all (\x-> name == funName x) xs
+isCommutative _ _ = False
+
+simplifyM:: Fom -> Analyzer Fom
+simplifyM fom = do
+    simp <- fmap conSimp getContext
+    list <- fmap conList getContext
+    return $ simplify list simp fom
+
+derivateM:: (Fom, Fom) -> Analyzer (Maybe Fom)
+derivateM pair = do
+    impl <- fmap conImpl getContext
+    return $ derivate impl pair
+
+buildFom:: Expr -> Analyzer (Maybe Fom)
+buildFom (NumExpr num) = return $ Just $ NumFom num
+buildFom (StrExpr str) = return $ Just $ StrFom str
+
+buildFom (IdentExpr id) = do
+    mEnt <- lookupEnt $ idStr id
+    maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent->
+        return $ Just $ VarFom id (entType ent)
+
+buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
+    mArgs <- mapM buildFom (extractFromTuple arg)
+    mRet <- buildFom ret
+    return $ FunTypeFom id <$> (conjMaybe mArgs) <*> mRet
+    where
+    extractFromTuple:: Expr -> [Expr]
+    extractFromTuple (FunExpr (Ident _ "tuple") args) = args
+    extractFromTuple fom = [fom]
+
+buildFom e@(FunExpr id@(Ident pos fun) args) = do
+    mEnt <- lookupEnt fun
+    mArgs <- mapM buildFom args
+    maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent-> do
+        let ty = entType ent
+        checkFunc ty mArgs
+        return $ FunFom OFun id ty <$> (conjMaybe mArgs)
+    where
+    checkFunc:: Fom -> [Maybe Fom] -> Analyzer Bool
+    checkFunc (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
+        then analyzeErrorB id "Argument number wrong"
+        else do
+            mapM_ (uncurry checkType) $ zip argVls argTys
+            return False
+    checkFunc _ _ = analyzeErrorB id $ "Not function:" ++ idStr id
+    checkType:: Maybe Fom -> Fom -> Analyzer ()
+    checkType (Just vl) ty = let vlTy = evalType vl in unless (vlTy == ty) $ do
+        eStr <- onOpeMap showFom vlTy
+        aStr <- onOpeMap showFom ty
+        let msg = "Couldn't match expected type '" ++ eStr ++ "' with actual type '" ++ aStr ++ "'"
+        analyzeError (showIdent vl) msg
     checkType _ _ = return ()
     
-buildFormula e = return Nothing -- error $ "Wrong pattern:" ++ show e 
+buildFom e = return Nothing -- error $ "Wrong pattern:" ++ show e 
 
--- ex. (1, 2) => [1, 2], x => [x]
-extractFormulasFromTuple:: Formula -> [Formula]
-extractFormulasFromTuple x@(FunFormula f xs) = if show f == "tuple" then xs else [x]
-extractFormulasFromTuple x = [x]
+getLabel:: Maybe Fom -> Maybe String
+getLabel (Just fun@FunFom{}) = Just $ idStr $ funName fun
+getLabel  Nothing = Nothing
 
+buildRule:: Expr -> Analyzer (Maybe Rule)
+buildRule (FunExpr id@(Ident _ "=>") [bf, af]) = do
+    let checkType (Just fom) = when (evalType fom /= makeType "Prop") (analyzeError (funName fom) "This is not prop")
+        checkType Nothing = return ()
+    bfFom <- buildFom bf
+    afFom <- buildFom af
+    checkType bfFom
+    checkType afFom
+    return $ Rule SimpRule id <$> getLabel bfFom <*> bfFom <*> afFom
+
+buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = do
+    let checkType (Just bf) (Just af) = evalType bf == evalType af
+        checkType _ _ = False
+    bfFom <- buildFom bf
+    afFom <- buildFom af
+    if checkType bfFom afFom 
+        then return $ Rule ImplRule id <$> getLabel bfFom <*> bfFom <*> afFom
+        else analyzeErrorM id "error"
+
+buildRule expr = analyzeErrorM (showExprIdent expr) "Invaild rule"
+ 
 returnMessage:: a -> Message -> Analyzer a
 returnMessage a m = Analyzer $ \ctx-> ([m], ctx, a)
 
-isIdentOf:: String -> Formula -> Bool
-isIdentOf t (VarFormula id) = t == show id
-isIdentOf _ _ = False
+insertRule:: Rule -> Analyzer ()
+insertRule rule = case ruleKind rule of
+    SimpRule -> do
+        insertSimp (ruleIdent rule) (ruleBf rule) (ruleAf rule)
+        updateSimp $ M.insertWith (++) (ruleLabel rule) [rule]
+    ImplRule -> updateImpl $ M.insertWith (++) (ruleLabel rule) [rule]
 
-isTypeType:: Formula -> Bool
-isTypeType = isIdentOf "Type"
+buildCmd:: IdentCmd -> Analyzer ProofCmd
+buildCmd (IdentCmd id StepCmd) = return StepProofCmd
+buildCmd (IdentCmd id ImplCmd) = return ImplProofCmd
+buildCmd (IdentCmd id UnfoldCmd) = return UnfoldProofCmd
+buildCmd (IdentCmd id _) = do
+    analyzeErrorM id "Invaild command"
+    return WrongProofCmd
 
--- concat specified function arguments
--- ex. extractArgs "add" add(add(1, 2), add(3, 4)) => [1, 2, 3, 4]
-extractArgs:: String -> Formula -> [Formula]
-extractArgs str e@(FunFormula f as) = if str == show f then concatMap (extractArgs str) as else [e]
-extractArgs str e = [e]
+buildProofRewrite:: IdentStm -> Analyzer (Maybe ProofRewrite)
+buildProofRewrite (IdentStm id (CmdStm idCmd exp)) = do
+    fom <- buildFom exp
+    cmd <- buildCmd idCmd
+    let proof = CmdProof cmd <$> fom
+    return $ Just $ fromMaybe WrongProof proof
 
--- (argument types, return type) -> function type
-makeFuncType:: [Formula] -> Formula -> Formula
-makeFuncType [arg] ret = FunFormula (FuncTypeIdent NonePosition) [arg, ret]
-makeFuncType args ret = FunFormula (FuncTypeIdent NonePosition) [FunFormula (StringIdent NonePosition "tuple") args, ret]
+buildProofRewrite (IdentStm id (AssumeStm idCmd assume stm)) = do
+    cmd <- buildCmd idCmd
+    fom <- buildFom assume
+    block <- buildProof stm
+    let proof = AssumeProof cmd <$> fom <*> Just block
+    return $ Just $ fromMaybe WrongProof proof
 
-insertRule:: Formula -> Analyzer ()
-insertRule rule = do
-    nrule <- buildFormula rule
-    case nrule of
-        Just (FunFormula f [a@(FunFormula g _), b]) -> insertRule a b (show f) (show g)
-        Just fom@FunFormula{} -> analyzeError (showIdent fom) "Left side must be a function"
-        Just fom -> analyzeError (showIdent fom) "wrong function"
-        Nothing -> return ()
+buildProofRewrite (IdentStm id (ForkStm list)) = do
+    forks <- mapM buildFork list
+    return $ Just $ ForkProof forks
     where
-    insertRule:: Formula -> Formula -> String -> String -> Analyzer ()
-    insertRule before after ">>=" f = do
-        insertSimp before after
-        updateSRule $ M.insertWith (++) f [(before, after)]
-    insertRule before after "=>" f = updateIRule $ M.insertWith (++) f [(before, after)]
-    insertRule before _ _ _ = analyzeError (showIdent before) "Wrong function"
+    buildFork:: (IdentCmd, [IdentStm]) -> Analyzer (ProofCmd, Proof)
+    buildFork (idCmd, stms) = do
+        cmd <- buildCmd idCmd
+        block <- buildProof stms
+        return (cmd, block)
 
-runCommand:: Command -> Formula -> Formula -> Analyzer Formula
-runCommand StepCmd goal input = do
-    strg <- simplifyM input
-    sgoal <- simplifyM goal
-    case mergeRewrite strg sgoal of
-        Just proof -> return strg
+buildProofRewrite (IdentStm id (ForAllStm var ty)) = do
+    mFom <- buildFom ty
+    case mFom of
+        Just fom -> updateVar $ M.insert (idStr var) $ Variable ForAll fom
+        Nothing -> return ()
+    return Nothing
+
+buildProofRewrite (IdentStm id (ExistsStm var refs ty)) = do
+    mFom <- buildFom ty
+    case mFom of
+        Just fom -> updateVar $ M.insert (idStr var) $ Variable (Exists refs) fom
+        Nothing -> return ()
+    return Nothing
+
+buildProof:: [IdentStm] -> Analyzer Proof
+buildProof (IdentStm id x:xs) = case x of
+    (CmdStm (IdentCmd _ BeginCmd) exp) -> do
+        fom <- buildFom exp
+        rew <- buildProofRewriteList xs
+        let org = maybe ProofOriginWrong ProofOriginFom fom
+        return $ Proof org rew
+    (CmdStm (IdentCmd _ TargetCmd) exp) -> do 
+        rew <- buildProofRewriteList xs
+        trg <- case exp of
+            (IdentExpr (Ident _ "left")) -> return $ Just ProofTrgLeft
+            (IdentExpr (Ident _ "context")) -> return $ Just ProofTrgContext
+            exp -> analyzeErrorM (showExprIdent exp) "Not exist"
+        let org = maybe ProofOriginWrong ProofOriginTrg trg
+        return $ Proof org rew
+    _ -> do
+        analyzeError id "This is not proof begin"
+        rew <- buildProofRewriteList xs
+        return $ Proof ProofOriginWrong rew
+    where
+    buildProofRewriteList xs = extractMaybe <$> mapM buildProofRewrite xs
+
+buildProofEnv:: [IdentStm] -> Analyzer ProofEnv
+buildProofEnv stms = do
+    updateVar $ const M.empty
+    proof <- buildProof stms
+    vmap <- fmap conVar getContext
+    return $ ProofEnv proof vmap
+
+analyzeProofRewrite:: Fom -> ProofRewrite -> Analyzer Fom
+analyzeProofRewrite trg (CmdProof StepProofCmd goal) = do
+    sTrg <- simplifyM trg
+    sGoal <- simplifyM goal
+    case mergeRewrite sTrg sGoal of
+        Just proof -> return sGoal
         Nothing -> do
-            st <- onOpeMap showLatestFormula strg
-            sg <- onOpeMap showLatestFormula sgoal
-            ps <- onOpeMap showCodeFormula goal
-            let msg = "Couldn't match simplified terms with '" ++ st ++ "' and '" ++ sg ++ "'"
-            returnMessage sgoal $ Message ps msg
-runCommand ImplCmd goal input = do
-    res <- derivateM (input, goal)
+            strTrg <- onOpeMap showLatestFom sTrg
+            strGoal <- onOpeMap showLatestFom sGoal
+            let msg = "Couldn't match simplified terms with '" ++ strTrg ++ "' and '" ++ strGoal ++ "'"
+            analyzeError (showIdent goal) msg
+            return sGoal
+
+analyzeProofRewrite trg (CmdProof ImplProofCmd goal) = do
+    res <- derivateM (trg, goal)
     case res of
         Just proof -> return proof
-        Nothing -> do 
-            ps <- onOpeMap showCodeFormula goal
-            b <- onOpeMap showLatestFormula input
-            returnMessage goal $ Message ps $ "Couldn't derivate from '" ++ b ++ "'"
+        Nothing -> do
+            str <- onOpeMap showLatestFom goal
+            analyzeError (showIdent goal) $ "Couldn't derivate from '" ++ str ++ "'"
+            return goal
 
-runStatement:: Formula -> Statement -> Analyzer Formula
-runStatement input = \case
-    SingleStm cmd goal -> runCommand cmd goal input
-    AssumeStm cmd ass first main -> do
-        -- P => X -> [A, B, C]
-        -- [P, Q, X -> [A, B, C]]
-        begin <- runCommand cmd input (FunFormula (StringIdent NonePosition "=>") [ass, first])
-        block <- runStatement first main
-        return $ Rewrite EqualReason begin (FunFormula (StringIdent NonePosition "=>") [ass, block])
-    BlockStm stms -> runStms stms input where 
-        runStms:: [Statement] -> Formula -> Analyzer Formula
-        runStms xs input = foldM runStatement input xs
+-- analyzeProofRewrite trg (CmdProof UnfoldProofCmd goal) = do
 
 subScope::Analyzer a -> Analyzer a
 subScope subRountine = do
@@ -167,19 +230,19 @@ subScope subRountine = do
     updateScope $ const tmap
     return res
 
-loadVarDec:: (Ident, Formula) -> Analyzer ()
-loadVarDec (id, tFormula) = do
-    mnt <- buildFormula tFormula
+loadVarDec:: (Ident, Fom) -> Analyzer ()
+loadVarDec (id, tFom) = do
+    mnt <- buildFom tFom
     maybe (return ()) (addIdent False id) mnt
 
 -- reflect a declaration in the global scope and analyze type and proof
 loadDecla:: Decla -> Analyzer ()
 loadDecla (Theorem decs prop stm) = subScope $ do
     mapM_ (mapM_ loadVarDec) decs
-    mnprop <- buildFormula prop
+    mnprop <- buildFom prop
     maybeFlip mnprop (return ()) $ \nprop-> do
         case nprop of
-            (FunFormula _ [start, _]) -> return () -- Just <$> runStatement start stm
+            (FunFom _ [start, _]) -> return () -- Just <$> runStatement start stm
             _ -> analyzeError (showIdent prop) "Not function"
         insertRule nprop
 
@@ -187,8 +250,8 @@ loadDecla (Axiom decs prop) = subScope $ do
     mapM_ (mapM_ loadVarDec) decs
     insertRule prop
 
-loadDecla (Undef id tFormula mtex) = do
-    mnt <- buildFormula tFormula
+loadDecla (Undef id tFom mtex) = do
+    mnt <- buildFom tFom
     maybe (return ()) (addIdent True id) mnt
     case mtex of 
         Just tex -> updateLatex $ M.insert (show id) tex
@@ -200,25 +263,26 @@ loadDecla (Define t args ret def) = do
     addIdent True t (makeFuncType (map snd (head args)) ret)
 
 loadDecla (DataType id def) = do
-    addIdent True id typeType
-    addCstr cstrs
+    insertEnt True id TypeOfType
+    mapM_ insertCstr $ extractArgs "|" def
     where
-    thisType = makeVarFormula (show id)
-    cstrs = extractArgs "|" def
-    addCstr:: [Formula] -> Analyzer ()
-    addCstr [] = return ()
-    addCstr (VarFormula x:xs) = do
-        addIdent True x thisType
-        addCstr xs
-    addCstr (FunFormula x as:xs) = do
-        argsm <- mapM buildFormula as
-        case conjMaybe argsm of
-            Just args -> do
-                let cstrType = makeFuncType (map evalType args) thisType
-                addIdent True x cstrType
-                addCstr xs
-            Nothing -> return ()
-    addCstr e = error $ show e
+    insertCstr:: Fom -> Analyzer ()
+    insertCstr (VarFom id ty) = insertEnt True id ty
+    insertCstr (FunExpr id args) = do
+        mArgs <- mapM buildFom args
+        mapM_ mArgs checkType
+        case conjMaybe mArgs of
+            Just args -> return FunTypeFom { funTypeIdent=id, funArgTypes=args, funRetType=TypeOfType }
+            Nothing -> return Nothing
+        where
+        checkType (Just fom) = when evalType fom /= TypeOfType $ analyzeError id "This is not Type" 
+        checkType Nothing = return ()
+    insertCstr e = error $ show e
+    -- concat specified function arguments
+    -- ex. extractArgs "add" add(add(1, 2), add(3, 4)) => [1, 2, 3, 4]
+    extractArgs:: String -> Expr -> [Expr]
+    extractArgs str fun@(FunExpr id args) = if str == idStr id then concatMap (extractArgs str) args else [fun]
+    extractArgs str expr = [expr]
 
 loadDecla _ = return ()
 

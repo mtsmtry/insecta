@@ -113,65 +113,82 @@ instance Eq IdentInt where
 -- Expression
 data Expr = IdentExpr Ident
     | FunExpr Ident [Expr]
-    | StringExpr Ident
-    | NumberExpr IdentInt deriving (Show)
+    | StrExpr Ident
+    | NumExpr IdentInt deriving (Show)
+
+showExprIdent:: Expr -> Ident
+showExprIdent (IdentExpr id) = id
+showExprIdent (FunExpr id _) = id
+showExprIdent (StrExpr id) = id
+showExprIdent (NumExpr (IdentInt pos num)) = Ident pos (show num)
 
 -- Formula
-data Formula = Formula { fomBody::FormulaBody, evalType::Formula }
-    | TypeOfType 
-    | Rewrite { reason::Reason, later::Formula, older::Formula } deriving (Eq, Show)
+data FunAttr = OFun | CFun | ACFun String deriving (Eq, Show)
 
-data FunType = OFun | CFun | ACFun String deriving (Eq, Show)
+data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
+    | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] } 
+    | CstFom { cstName::Ident, cstType::Fom }
+    | VarFom { varName::Ident, varType::Fom }
+    | StrFom Ident
+    | NumFom IdentInt
+    | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
+    | TypeOfType deriving (Eq, Show)
 
-data FormulaBody = FunTypeFormula { funTypeName::Ident, funArgTypes::[Formula], funRetType::Formula }
-    | FunFormula { funType::FunType, funName::Ident, funArgs::[Formula] } 
-    | CstFormula Ident
-    | VarFormula Ident
-    | StrFormula Ident
-    | NumFormula Int deriving (Eq, Show)
-
-data Reason = StepReason Rule AssignMap 
-    | ImplReason Rule AssignMap 
+data Reason = NormalReason Rule AssignMap 
     | EqualReason deriving (Eq, Show)
 
-makeTypeFormula:: String -> Formula
-makeTypeFormula str = Formula (CstFormula $ Ident NonePosition str) TypeOfType
+showIdent:: Fom -> Ident
+showIdent fom@FunTypeFom{} = funTypeIdent fom
+showIdent fom@FunFom{} = funName fom
+showIdent fom@CstFom{} = cstName fom
+showIdent fom@VarFom{} = varName fom
+showIdent (StrFom id) = id
+showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
 
-latestFormula:: Formula -> Formula
-latestFormula fom@Rewrite{} = later fom
-latestFormula fom = fom 
+evalType:: Fom -> Fom
+evalType TypeOfType = error "evalType TypeOfType"
+evalType Rewrite{} = error "evalType Rewrite{}"
+evalType fom@FunFom{} = funType fom
+evalType fom@CstFom{} = cstType fom
+evalType fom@VarFom{} = varType fom
+evalType StrFom{} = makeType "String"
+evalType NumFom{} = makeType "N"
+evalType FunTypeFom{} = TypeOfType
 
-oldestFormula:: Formula -> Formula
-oldestFormula fom@Rewrite{} = older fom
-oldestFormula fom = fom
+makeType:: String -> Fom
+makeType str = CstFom{cstName=Ident NonePosition str, cstType=TypeOfType}
 
-applyArgs:: (Formula -> Formula) -> Formula -> Formula
-applyArgs apply fom = applyArgs fom where
-    applyArgs:: Formula -> Formula
-    applyArgs (Formula fun@FunFormula{} etype) = Formula fun{funArgs=map apply $ funArgs fun} etype
-    applyArgs _ = apply fom
+propType = makeType "Prop"
 
-funIdent:: Formula -> Maybe Ident
-funIdent fom@Formula{} = funBodyIdent $ fomBody fom where
-    funBodyIdent:: FormulaBody -> Maybe Ident
-    funBodyIdent fun@FunTypeFormula{} = Just $ funName fun
-    funBodyIdent _ = Nothing
+latestFom:: Fom -> Fom
+latestFom fom@Rewrite{} = rewLater fom
+latestFom fom = fom 
 
-changeArgs:: Formula -> [Formula] -> Formula
-changeArgs (Formula (FunFormula ftype id _) etype) args = (Formula (FunFormula ftype id args) etype)
+oldestFom:: Fom -> Fom
+oldestFom fom@Rewrite{} = rewOlder fom
+oldestFom fom = fom
+
+applyArgs:: (Fom -> Fom) -> Fom -> Fom
+applyArgs apply fun@FunFom{} = fun{funArgs=map apply $ funArgs fun}
+applyArgs apply fom = apply fom
+
+applyArgsOnce:: (Fom -> Maybe Fom) -> Fom -> Maybe Fom
+applyArgsOnce apply fun@FunFom{} = do
+    nargs <- applyOnce (funArgs fun) []
+    return fun{funArgs=nargs}
+    where
+    applyOnce:: [Fom] -> [Fom] -> Maybe [Fom]
+    applyOnce [] _ = Nothing
+    applyOnce (a:as) as' = maybe (applyOnce as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (apply a)
 
 -- Rewriting
-type Rule = (Formula, Formula)
-type AssignMap = M.Map String Formula
+data RuleKind = SimpRule | ImplRule deriving (Eq, Show)
+data Rule = Rule{ ruleKind::RuleKind, ruleIdent::Ident, ruleLabel::String, ruleBf::Fom, ruleAf::Fom } deriving (Eq, Show)
+type AssignMap = M.Map String Fom
 
 -- Program
-data Statement = SingleStm Command Expr
-    | BlockStm [Statement]
-    | AssumeStm Command Expr Expr Statement
-    | ForkStm [Statement] deriving (Show)
-
 data Decla = Axiom [VarDec] Expr 
-    | Theorem [VarDec] Expr Statement
+    | Theorem [VarDec] Expr [IdentStm]
     | Define Ident [VarDec] Expr Expr
     | Predicate Ident Ident Expr [VarDec] Expr
     | DataType Ident Expr 
@@ -180,18 +197,37 @@ data Decla = Axiom [VarDec] Expr
 
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
-data Command = StepCmd | ImplCmd | UnfoldCmd | WrongCmd String deriving (Show)
-
-data Entity = Entity { entName::String, entType::Formula, entConst::Bool, entLatex::String } deriving (Show)
+data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::String } deriving (Show)
     
+data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Show)
+data IdentCmd = IdentCmd Ident Command deriving (Show)
+data IdentStm = IdentStm { identStmId::Ident, identStmStm::Statement } deriving (Show)
+data Statement = CmdStm IdentCmd Expr
+    | AssumeStm IdentCmd Expr [IdentStm]
+    | ForkStm [(IdentCmd, [IdentStm])]
+    | ExistsStm Ident [Ident] Expr
+    | ForAllStm Ident Expr deriving (Show)
+
+data ProofCmd = StepProofCmd | ImplProofCmd | UnfoldProofCmd | WrongProofCmd
+data ProofTrg = ProofTrgLeft | ProofTrgContext
+data ProofOrigin = ProofOriginFom Fom | ProofOriginTrg ProofTrg | ProofOriginWrong
+data ProofRewrite = CmdProof ProofCmd Fom | AssumeProof ProofCmd Fom Proof | ForkProof [(ProofCmd, Proof)] | WrongProof
+data Proof = Proof ProofOrigin [ProofRewrite]
+data ProofEnv = ProofEnv Proof VarMap
+
+data Quantifier = ForAll | Exists [Ident]
+data Variable = Variable Quantifier Fom
+type VarMap = M.Map String Variable
+
 -- Context
 type RuleMap = M.Map String [Rule]
 type Simplicity = [String] -- functions ordered by simplicity
 type EntityMap = M.Map String Entity
-type LatexMap = M.Map String Formula
-type PredicateMap = M.Map String Formula
+type LatexMap = M.Map String Fom
+type PredicateMap = M.Map String Fom
 
 data Context = Context { 
+    conVar::VarMap,
     conOpe::OpeMap,
     conList::Simplicity,
     conSimp::RuleMap, 
@@ -201,6 +237,7 @@ data Context = Context {
     
 newContext:: OpeMap -> Context
 newContext omap = Context { 
+        conVar=M.empty,
         conOpe=omap,
         conList=[],
         conSimp=M.empty, 
@@ -212,8 +249,9 @@ newContext omap = Context {
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
 
--- Context Monad
+-- Context Accesser
 updateContext selector f = Analyzer $ ([], , ()) . f
+updateVar f = Analyzer $ \ctx-> ([], ctx{conVar=f $ conVar ctx}, ())
 updateList f = Analyzer $ \ctx-> ([], ctx{conList=f $ conList ctx}, ())
 updateSimp f = Analyzer $ \ctx-> ([], ctx{conSimp=f $ conSimp ctx}, ())
 updateImpl f = Analyzer $ \ctx-> ([], ctx{conImpl=f $ conImpl ctx}, ())
@@ -237,10 +275,9 @@ analyzeErrorB ps str = Analyzer ([Message ps str], , False)
 analyzeError:: Ident -> String -> Analyzer ()
 analyzeError ps str = Analyzer ([Message ps str], , ())
 
--- Context Accesser
-insertEnt:: Bool -> Ident -> Formula -> Analyzer ()
-insertEnt const id _type = updateEnt $ M.insert (show id) 
-    (Entity { entName=show id, entType=_type, entConst=const, entLatex="" })
+insertEnt:: Bool -> Ident -> Fom -> Analyzer ()
+insertEnt const id ty = updateEnt $ M.insert (show id) 
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex="" })
 
 lookupEnt:: String -> Analyzer (Maybe Entity)
 lookupEnt str = do
