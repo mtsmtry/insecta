@@ -35,18 +35,7 @@ isCommutative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
     sameName (x:xs) = let name = funName x in all (\x-> name == funName x) xs
 isCommutative _ _ = False
 
-simplifyM:: Fom -> Analyzer Fom
-simplifyM fom = do
-    simp <- fmap conSimp getContext
-    list <- fmap conList getContext
-    return $ simplify list simp fom
-
-derivateM:: (Fom, Fom) -> Analyzer (Maybe Fom)
-derivateM pair = do
-    impl <- fmap conImpl getContext
-    return $ derivate impl pair
-
-data BuildFomOption = AllowUndefined | NotAllowUndefined
+data BuildFomOption = AllowUndefined | NotAllowUndefined deriving(Eq, Show)
 
 buildFom = buildFomEx NotAllowUndefined
 
@@ -135,61 +124,61 @@ insertRule rule = case ruleKind rule of
         updateSimp $ M.insertWith (++) (ruleLabel rule) [rule]
     ImplRule -> updateImpl $ M.insertWith (++) (ruleLabel rule) [rule]
 
-buildCmd:: IdentCmd -> Analyzer ProofCmd
-buildCmd (IdentCmd id StepCmd) = return StepProofCmd
-buildCmd (IdentCmd id ImplCmd) = return ImplProofCmd
-buildCmd (IdentCmd id UnfoldCmd) = return UnfoldProofCmd
+buildCmd:: IdentCmd -> Analyzer Command
+buildCmd (IdentCmd id StepCmd) = return Command
+buildCmd (IdentCmd id ImplCmd) = return ImplCmd
+buildCmd (IdentCmd id UnfoldCmd) = return UnfoldCmd
 buildCmd (IdentCmd id _) = do
     analyzeErrorM id "Invaild command"
     return WrongProofCmd
 
-buildProofRewrite:: IdentStm -> Analyzer (Maybe ProofRewrite)
-buildProofRewrite (IdentStm id (CmdStm idCmd exp)) = do
-    fom <- buildFom exp
+buildStrategyRewrite:: IdentStm -> Analyzer (Maybe StrategyRewrite)
+buildStrategyRewrite (IdentStm id (CmdStm idCmd exp)) = do
     cmd <- buildCmd idCmd
+    fom <- if cmd == UnfoldProofCmd then buildFomEx AllowUndefined exp else buildFom exp
     let proof = CmdProof cmd <$> fom
     return $ Just $ fromMaybe WrongProof proof
 
-buildProofRewrite (IdentStm id (AssumeStm idCmd assume stm)) = do
+buildStrategyRewrite (IdentStm id (AssumeStm idCmd assume stm)) = do
     cmd <- buildCmd idCmd
     fom <- buildFom assume
-    block <- buildProof stm
+    block <- buildStrategy stm
     let proof = AssumeProof cmd <$> fom <*> Just block
     return $ Just $ fromMaybe WrongProof proof
 
-buildProofRewrite (IdentStm id (ForkStm list)) = do
+buildStrategyRewrite (IdentStm id (ForkStm list)) = do
     forks <- mapM buildFork list
     return $ Just $ ForkProof forks
     where
-    buildFork:: (IdentCmd, [IdentStm]) -> Analyzer (ProofCmd, Proof)
+    buildFork:: (IdentCmd, [IdentStm]) -> Analyzer (Command, Proof)
     buildFork (idCmd, stms) = do
         cmd <- buildCmd idCmd
-        block <- buildProof stms
+        block <- buildStrategy stms
         return (cmd, block)
 
-buildProofRewrite (IdentStm id (ForAllStm var ty)) = do
+buildStrategyRewrite (IdentStm id (ForAllStm var ty)) = do
     mFom <- buildFom ty
     case mFom of
         Just fom -> updateVar $ M.insert (idStr var) $ Variable ForAll fom
         Nothing -> return ()
     return Nothing
 
-buildProofRewrite (IdentStm id (ExistsStm var refs ty)) = do
+buildStrategyRewrite (IdentStm id (ExistsStm var refs ty)) = do
     mFom <- buildFom ty
     case mFom of
         Just fom -> updateVar $ M.insert (idStr var) $ Variable (Exists refs) fom
         Nothing -> return ()
     return Nothing
 
-buildProof:: [IdentStm] -> Analyzer Proof
-buildProof (IdentStm id x:xs) = case x of
+buildStrategy:: [IdentStm] -> Analyzer Strategy
+buildStrategy (IdentStm id x:xs) = case x of
     (CmdStm (IdentCmd _ BeginCmd) exp) -> do
         fom <- buildFom exp
-        rew <- buildProofRewriteList xs
+        rew <- buildStrategyRewriteList xs
         let org = maybe ProofOriginWrong ProofOriginFom fom
         return $ Proof org rew
     (CmdStm (IdentCmd _ TargetCmd) exp) -> do 
-        rew <- buildProofRewriteList xs
+        rew <- buildStrategyRewriteList xs
         trg <- case exp of
             (IdentExpr (Ident _ "left")) -> return $ Just ProofTrgLeft
             (IdentExpr (Ident _ "context")) -> return $ Just ProofTrgContext
@@ -198,34 +187,38 @@ buildProof (IdentStm id x:xs) = case x of
         return $ Proof org rew
     _ -> do
         analyzeError id "This is not proof begin"
-        rew <- buildProofRewriteList xs
+        rew <- buildStrategyRewriteList xs
         return $ Proof ProofOriginWrong rew
     where
-    buildProofRewriteList xs = extractMaybe <$> mapM buildProofRewrite xs
+    buildStrategyRewriteList xs = extractMaybe <$> mapM buildStrategyRewrite xs
 
-buildProofEnv:: [IdentStm] -> Analyzer ProofEnv
-buildProofEnv stms = do
+-- buildStrategyEnv:: [IdentStm] -> Analyzer ProofEnv
+buildStrategyEnv stms = do
     updateVar $ const M.empty
-    proof <- buildProof stms
+    proof <- buildStrategy stms
     vmap <- fmap conVar getContext
     return $ ProofEnv proof vmap
 
-analyzeProofOrigin:: ProofOrigin
-analyzeProofOrigin (ProofOriginTrg (ProofTrgContext con)) = do
-    let props = extractArgs "&" con 
+buildStrategyOrigin:: StrategyOrigin -> Analyzer ProofOrigin
+buildStrategyOrigin (StrategyOriginTrg (StrategyTrgContext con)) = do
+    let props = extractArgs "&" con
     preds <- mapM checkCon props
-    
+    return con
     where
-    checkCon:: Fom -> Analyzer (Maybe (Ident, Fom))
-    checkCon (PredFom pred ty) = return $ Jsut (pred, ty)
+    checkCon:: Fom -> Analyzer (Maybe (Entity, Fom))
+    checkCon (PredFom pred ty) = do
+        ent <- lookupEnt pred
+        if entType ent == ty
+            then return $ Just (ent, ty)
+            else analyzeErrorM pred "Not found on context"
     checkCon fom = analyzeError (showIdent fom) "Not pred"
 
-analyzeProofRewrite:: Fom -> ProofRewrite -> Analyzer Fom
-analyzeProofRewrite trg (CmdProof StepProofCmd goal) = do
-    sTrg <- simplifyM trg
-    sGoal <- simplifyM goal
+buildProofCommand:: Fom -> Command -> Fom -> Analyzer ProofCommand
+buildProofCommand trg StepCmd goal = do
+    sTrg <- simplify trg
+    sGoal <- simplify goal
     case mergeRewrite sTrg sGoal of
-        Just proof -> return sGoal
+        Just proof -> return $ ProofCommand trg StepCmd goal
         Nothing -> do
             strTrg <- onOpeMap showLatestFom sTrg
             strGoal <- onOpeMap showLatestFom sGoal
@@ -233,8 +226,8 @@ analyzeProofRewrite trg (CmdProof StepProofCmd goal) = do
             analyzeError (showIdent goal) msg
             return sGoal
 
-analyzeProofRewrite trg (CmdProof ImplProofCmd goal) = do
-    res <- derivateM (trg, goal)
+buildProofCommand trg ImplCmd goal = do
+    res <- derivate (trg, goal)
     case res of
         Just proof -> return proof
         Nothing -> do
@@ -242,7 +235,27 @@ analyzeProofRewrite trg (CmdProof ImplProofCmd goal) = do
             analyzeError (showIdent goal) $ "Couldn't derivate from '" ++ str ++ "'"
             return goal
 
--- analyzeProofRewrite trg (CmdProof UnfoldProofCmd goal) = do
+buildProofCommand trg UnfoldCmd goal = do
+    res <- derivateUnfold (trg, goal)
+    case res of
+        Just proof -> return proof
+
+buildProofProcess:: Fom -> StrategyRewrite -> Analyzer (ProofProcess, Fom)
+buildProofProcess trg (CmdRewrite cmd goal) = do
+    proc <- buildProofCommand trg cmd goal
+    return (maybe WrongProcess CmdProcess proc, goal)
+
+buildProofProcess trg (AssumeRewrite cmd assume main) = do
+    let implies a b = FunFom OFun (Ident NonePosition "=>") propType [a, b]
+    proof <- buildProof main
+    let fom = implies assume main
+    proofCmd <- buildProofCommand trg cmd (oldestFom fom)
+    let result = implies assume (latestFom proof)
+    return (AssumeProcess proofCmd assume proof, result)
+
+buildProof:: Strategy -> Analyzer Proof
+buildProof (ProofStrategy orgn rews) = do
+    buildProofProcess 
 
 subScope::Analyzer a -> Analyzer a
 subScope subRountine = do

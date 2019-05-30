@@ -203,7 +203,7 @@ data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::String }
     | PredicateEntity { predSelf::String, predExtend::Fom, predDef::Fom }  deriving (Show)
     
-data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Show)
+data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
 data IdentCmd = IdentCmd Ident Command deriving (Show)
 data IdentStm = IdentStm { identStmId::Ident, identStmStm::Statement } deriving (Show)
 data Statement = CmdStm IdentCmd Expr
@@ -212,12 +212,15 @@ data Statement = CmdStm IdentCmd Expr
     | ExistsStm Ident [Ident] Expr
     | ForAllStm Ident Expr deriving (Show)
 
-data ProofCmd = StepProofCmd | ImplProofCmd | UnfoldProofCmd | WrongProofCmd
-data ProofTrg = ProofTrgLeft | ProofTrgContext Fom
-data ProofOrigin = ProofOriginFom Fom | ProofOriginTrg ProofTrg | ProofOriginWrong
-data ProofRewrite = CmdProof ProofCmd Fom | AssumeProof ProofCmd Fom Proof | ForkProof [(ProofCmd, Proof)] | WrongProof
-data Proof = Proof ProofOrigin [ProofRewrite]
-data ProofEnv = ProofEnv Proof VarMap
+data StrategyTrg = StrategyTrgLeft | StrategyTrgContext Fom
+data StrategyOrigin = StrategyOriginFom Fom | StrategyOriginTrg StrategyTrg | StrategyOriginWrong
+data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy | ForkRewrite [(Command, Strategy)] | WrongRewrite
+data Strategy = ProofStrategy StrategyOrigin [StrategyRewrite]
+
+data ProofCommand = ProofCommand { prfCmdCmd::Command, prfCmdRewrite::Fom }
+data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess
+data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginTrg
+data Proof = Proof ProofOrigin [ProofProcess]
 
 data Quantifier = ForAll | Exists [Ident]
 data Variable = Variable Quantifier Fom

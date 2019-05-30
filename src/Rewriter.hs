@@ -92,8 +92,14 @@ insertSimp id a b = case (funIdent a, funIdent b) of
         insertAt x 0 as = x:as
         insertAt x i (a:as) = a:insertAt x (i - 1) as
 
-simplify:: Simplicity -> RuleMap -> Fom -> Fom
-simplify simps m e = maybe e (simplify simps m) $ step e where
+simplify:: Fom -> Analyzer Fom
+simplify fom = do
+    simp <- fmap conSimp getContext
+    list <- fmap conList getContext
+    return $ simplify' list simp fom
+
+simplify':: Simplicity -> RuleMap -> Fom -> Fom
+simplify' simps m e = maybe e (simplify' simps m) $ step e where
     step:: Fom -> Maybe Fom
     step e = applyByHeadList heads e where
         simpCompare a b = a `compare` b
