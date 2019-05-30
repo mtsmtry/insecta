@@ -21,27 +21,29 @@ popToken = Lexer $ \(pos, all) -> case all of
         | isIdentHead x -> make IdentToken isIdentBody
         | isOperator x -> make OperatorToken isOperator
         | isSymbol x -> ([], nextChar pos, xs, Just $ PosToken pos $ toSymbol [x])
-        | x == '"' -> make' StringToken ('"' /=)
+        | x == '"' -> makeQuote StringToken ('"' /=)
         | x == '#' -> let (t, rest) = span ('\n' /=) xs in ([], stepChar pos $ length t, rest, Nothing) 
-        | x == '\'' -> make' toChar ('\'' /=)
+        | x == '\'' -> makeQuoteOne toChar ('\'' /=)
         | x == '\n' -> ([], nextLine pos, xs, Nothing)
         | isSpace x -> ([], nextChar pos, xs, Nothing)
         | otherwise -> ([Message (Ident pos [x]) "wrong"], nextChar pos, xs, Nothing)
         where
-        -- (token constructor, tail condition) -> (messages, position, rest string, token)
-        make f g = ([], stepChar pos $ length t, rest, (Just . PosToken pos . f . (x:)) t) where (t, rest) = span g xs
-        make' f g = case all of 
-            [] -> ([Message (Ident pos [x]) "error"], pos, drop 1 rest, Nothing)
-            _ -> ([], pos, drop 1 rest, Just $ PosToken pos (f all)) 
-            where 
-            pos = stepChar pos $ length t
-            (t, rest) = span g xs
-        make'' f g = case all of
-            [] -> ([Message (Ident pos [x]) "error"], pos, drop 1 rest, Nothing)
-            (x:xs) -> ([Message (Ident pos [x]) "error"], pos, drop 1 rest, Nothing)
-            where
-            pos = stepChar pos $ length t
-            (t, rest) = span g xs
+        procAll:: Message -> (Char -> Bool) -> (String -> Maybe Token) -> ([Message], Position, [Token], Maybe Token)
+        procAll msgs cond cstr = (msgs, pos, rest, cstr x:chars >>= Just . PosToken pos) where
+            pos = stepChar pos $ length chars
+            (chars, rest) = span cond xs
+        procQuote:: Message -> (Char -> Bool) -> (String -> Maybe Token) -> ([Message], Position, [Token], Maybe Token)
+        procQuote msgs cond cstr = (msgs, pos, rest, cstr chars >>= Just . PosToken pos) where
+            pos = stepChar pos $ length chars
+            (chars, _:rest) = span cond xs
+        make = procAll []
+        makeQuote cstr cond = case all of
+            [] -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
+            _ -> procQuote [] cstr
+        makeQuoteOne cstr cond = case all of
+            [] -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
+            [x] -> procQuote [] cstr
+            (x:xs) -> makeprocQuoteQuote [Message (Ident pos [x]) "error"]
     where
     -- Char -> Bool
     [isIdentSymbol, isOperator, isSymbol] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&%", "(){}[],:"]

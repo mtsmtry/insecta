@@ -125,17 +125,17 @@ insertRule rule = case ruleKind rule of
     ImplRule -> updateImpl $ M.insertWith (++) (ruleLabel rule) [rule]
 
 buildCmd:: IdentCmd -> Analyzer Command
-buildCmd (IdentCmd id StepCmd) = return Command
+buildCmd (IdentCmd id StepCmd) = return StepCmd
 buildCmd (IdentCmd id ImplCmd) = return ImplCmd
 buildCmd (IdentCmd id UnfoldCmd) = return UnfoldCmd
 buildCmd (IdentCmd id _) = do
     analyzeErrorM id "Invaild command"
-    return WrongProofCmd
+    return WrongCmd
 
 buildStrategyRewrite:: IdentStm -> Analyzer (Maybe StrategyRewrite)
 buildStrategyRewrite (IdentStm id (CmdStm idCmd exp)) = do
     cmd <- buildCmd idCmd
-    fom <- if cmd == UnfoldProofCmd then buildFomEx AllowUndefined exp else buildFom exp
+    fom <- if cmd == UnfoldCmd then buildFomEx AllowUndefined exp else buildFom exp
     let proof = CmdProof cmd <$> fom
     return $ Just $ fromMaybe WrongProof proof
 
