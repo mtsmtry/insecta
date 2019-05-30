@@ -28,22 +28,22 @@ popToken = Lexer $ \(pos, all) -> case all of
         | isSpace x -> ([], nextChar pos, xs, Nothing)
         | otherwise -> ([Message (Ident pos [x]) "wrong"], nextChar pos, xs, Nothing)
         where
-        procAll:: Message -> (Char -> Bool) -> (String -> Maybe Token) -> ([Message], Position, [Token], Maybe Token)
-        procAll msgs cond cstr = (msgs, pos, rest, cstr x:chars >>= Just . PosToken pos) where
+        procAll:: [Message] -> (String -> Maybe Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
+        procAll msgs cstr cond = (msgs, pos, rest, cstr (x:chars) >>= Just . PosToken pos) where
             pos = stepChar pos $ length chars
             (chars, rest) = span cond xs
-        procQuote:: Message -> (Char -> Bool) -> (String -> Maybe Token) -> ([Message], Position, [Token], Maybe Token)
-        procQuote msgs cond cstr = (msgs, pos, rest, cstr chars >>= Just . PosToken pos) where
+        procQuote:: [Message] -> (String -> Maybe Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
+        procQuote msgs cstr cond = (msgs, pos, rest, cstr chars >>= Just . PosToken pos) where
             pos = stepChar pos $ length chars
             (chars, _:rest) = span cond xs
-        make = procAll []
-        makeQuote cstr cond = case all of
+        make cstr = procAll [] $ Just . cstr
+        makeQuote cstr = case all of
             [] -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
-            _ -> procQuote [] cstr
-        makeQuoteOne cstr cond = case all of
+            _ -> procQuote [] $ Just . cstr
+        makeQuoteOne cstr = case all of
             [] -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
-            [x] -> procQuote [] cstr
-            (x:xs) -> makeprocQuoteQuote [Message (Ident pos [x]) "error"]
+            [x] -> procQuote [] $ Just . cstr
+            (x:xs) -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
     where
     -- Char -> Bool
     [isIdentSymbol, isOperator, isSymbol] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&%", "(){}[],:"]
@@ -155,7 +155,7 @@ former <++> latter = former >>= \case
 infixl 1 <&&>
 (<&&>):: Parser (Maybe (a->b)) -> Parser a -> Parser (Maybe b)
 former <&&> latter = former >>= \case
-    Just f -> latter >>= return . Just . f
+    Just f -> Just . f <$> latter
     Nothing -> return Nothing
 
 infixl 1 <::>

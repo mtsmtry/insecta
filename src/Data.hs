@@ -137,7 +137,10 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | TypeOfType deriving (Eq, Show)
 
 data Reason = NormalReason Rule AssignMap 
-    | EqualReason deriving (Eq, Show)
+    | EqualReason deriving (Show)
+
+instance Eq Reason where
+    a == b = False
 
 showIdent:: Fom -> Ident
 showIdent fom@FunTypeFom{} = funTypeIdent fom
@@ -185,7 +188,7 @@ applyArgsOnce apply fun@FunFom{} = do
 
 -- Rewriting
 data RuleKind = SimpRule | ImplRule deriving (Eq, Show)
-data Rule = Rule{ ruleKind::RuleKind, ruleIdent::Ident, ruleLabel::String, ruleBf::Fom, ruleAf::Fom } deriving (Eq, Show)
+data Rule = Rule{ ruleKind::RuleKind, ruleIdent::Ident, ruleProof::Maybe Proof, ruleLabel::String, ruleBf::Fom, ruleAf::Fom } deriving (Show)
 type AssignMap = M.Map String Fom
 
 -- Program
@@ -212,15 +215,14 @@ data Statement = CmdStm IdentCmd Expr
     | ExistsStm Ident [Ident] Expr
     | ForAllStm Ident Expr deriving (Show)
 
-data StrategyTrg = StrategyTrgLeft | StrategyTrgContext Fom
-data StrategyOrigin = StrategyOriginFom Fom | StrategyOriginTrg StrategyTrg | StrategyOriginWrong
-data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy | ForkRewrite [(Command, Strategy)] | WrongRewrite
-data Strategy = ProofStrategy StrategyOrigin [StrategyRewrite]
+data StrategyOrigin = StrategyOriginLeft | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)
+data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy | ForkRewrite [(Command, Strategy)] | WrongRewrite deriving (Show)
+data Strategy = Strategy StrategyOrigin [StrategyRewrite] deriving (Show)
 
-data ProofCommand = ProofCommand { prfCmdCmd::Command, prfCmdRewrite::Fom }
-data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess
-data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginTrg
-data Proof = Proof ProofOrigin [ProofProcess]
+data ProofCommand = ProofCommand { prfCmdCmd::Command, prfCmdRewrite::Fom } deriving (Show)
+data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess deriving (Show)
+data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginLeft Fom | ProofOriginWrong deriving (Show)
+data Proof = Proof { prfOrigin::ProofOrigin, prfProcesses::[ProofProcess], prfBegin::Fom, prfEnd::Fom } deriving (Show)
 
 data Quantifier = ForAll | Exists [Ident]
 data Variable = Variable Quantifier Fom
