@@ -30,7 +30,7 @@ isCommutative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
         ([b, c], [x, y]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
         _ -> False
     _ -> False
-  where
+    where
     sameName:: [Fom] -> Bool
     sameName (x:xs) = let name = funName x in all (\x-> name == funName x) xs
 isCommutative _ _ = False
@@ -52,14 +52,14 @@ buildFomEx opt = buildFom where
                 then return $ Just $ CstFom id (entType ent)
                 else return $ Just $ VarFom id (entType ent)
             Nothing -> if opt == AllowUndefined
-                then return $ Just $ CstFom id UnknownFom
+                then return $ Just $ VarFom id UnknownFom
                 else analyzeErrorM id "Not defined"
 
     buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
         mArgs <- mapM buildFom (extractFromTuple arg)
         mRet <- buildFom ret
         return $ FunTypeFom id <$> (conjMaybe mArgs) <*> mRet
-      where
+        where
         extractFromTuple:: Expr -> [Expr]
         extractFromTuple (FunExpr (Ident _ "tuple") args) = args
         extractFromTuple fom = [fom]
@@ -69,25 +69,32 @@ buildFomEx opt = buildFom where
         mArgs <- mapM buildFom args
         maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent-> do
             let ty = entType ent
-            checkFunc ty mArgs
-            return $ FunFom OFun id ty <$> (conjMaybe mArgs)
-      where
-        checkFunc:: Fom -> [Maybe Fom] -> Analyzer Bool
+            nArgs <- checkFunc ty mArgs
+            return $ case ty of
+                tyFun@FunTypeFom{} -> FunFom OFun id (funRetType tyFun) <$> conjMaybe nArgs
+                _ -> Nothing
+        where
+        checkFunc:: Fom -> [Maybe Fom] -> Analyzer [Maybe Fom]
         checkFunc (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
-                then analyzeErrorB id "Argument number wrong"
-                else do
-                    mapM_ (uncurry checkType) $ zip argVls argTys
-                    return False
-        checkFunc _ _ = analyzeErrorB id $ "Not function:" ++ idStr id
-        checkType:: Maybe Fom -> Fom -> Analyzer ()
-        checkType (Just vl) ty = let vlTy = evalType vl in unless (vlTy == ty || vlTy == UnknownFom) $ do
-            eStr <- onOpeMap showFom vlTy
-            aStr <- onOpeMap showFom ty
-            let msg = "Couldn't match expected type '" ++ eStr ++ "' with actual type '" ++ aStr ++ "'"
-            analyzeError (showIdent vl) msg
-        checkType _ _ = return ()
-
-    buildFom _ = return Nothing -- error $ "Wrong pattern:" ++ show e 
+                then do
+                    analyzeErrorB id "Argument number wrong"
+                    return argVls
+                else zipWithM checkType argVls argTys
+        checkFunc _ vls = do
+            analyzeErrorB id $ "Not function:" ++ idStr id
+            return vls
+        checkType:: Maybe Fom -> Fom -> Analyzer (Maybe Fom)
+        checkType (Just (VarFom id UnknownFom)) ty = return $ Just $ VarFom id ty
+        checkType trg@(Just vl) ty = let vlTy = evalType vl in if vlTy == ty || vlTy == UnknownFom 
+            then return trg
+            else do
+                vStr <- onOpeMap showFom vl
+                eStr <- onOpeMap showFom vlTy
+                aStr <- onOpeMap showFom ty
+                let msg = vStr ++ ":Couldn't match expected type '" ++ eStr ++ "' with actual type '" ++ aStr ++ "'"
+                analyzeError (showIdent vl) msg
+                return trg
+        checkType _ _ = return Nothing
 
 getLabel:: Maybe Fom -> Maybe String
 getLabel (Just fun@FunFom{}) = Just $ idStr $ funName fun
@@ -95,13 +102,13 @@ getLabel Nothing = Nothing
 
 buildRule:: Expr -> Analyzer (Maybe Rule)
 buildRule (FunExpr id@(Ident _ "=>") [bf, af]) = do
-    let checkType (Just fom) = when (evalType fom /= makeType "Prop") (analyzeError (funName fom) "This is not prop")
+    let checkType (Just fom) = unless (evalType fom == makeType "Prop") (analyzeError (funName fom) "This is not prop")
         checkType Nothing = return ()
     bfFom <- buildFom bf
     afFom <- buildFom af
     checkType bfFom
     checkType afFom
-    return $ Rule SimpRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
+    return $ Rule ImplRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
 
 buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = do
     let checkType (Just bf) (Just af) = evalType bf == evalType af
@@ -109,8 +116,8 @@ buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     if checkType bfFom afFom
-        then return $ Rule ImplRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
-        else analyzeErrorM id "error"
+        then return $ Rule SimpRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
+        else analyzeErrorM id "Not match both type"
 
 buildRule expr = analyzeErrorM (showExprIdent expr) "Invaild rule"
 
@@ -158,7 +165,7 @@ buildStrategyRewrite (IdentStm id (AssumeStm idCmd assume stm)) = do
 buildStrategyRewrite (IdentStm id (ForkStm list)) = do
     forks <- mapM buildFork list
     return $ Just $ ForkRewrite forks
-  where
+    where
     buildFork:: (IdentCmd, [IdentStm]) -> Analyzer (Command, Strategy)
     buildFork (idCmd, stms) = do
         cmd <- buildCmd idCmd
@@ -198,7 +205,7 @@ buildStrategy (IdentStm id x:xs) = case x of
         analyzeError id "This is not proof begin"
         rew <- buildStrategyRewriteList xs
         return $ Strategy StrategyOriginWrong rew
-  where
+    where
     buildStrategyRewriteList xs = extractMaybe <$> mapM buildStrategyRewrite xs
 
 buildProofOrigin:: StrategyOrigin -> Analyzer (ProofOrigin, Fom)
@@ -206,7 +213,7 @@ buildProofOrigin (StrategyOriginContext con) = do
     let props = extractArgs "&" con
     preds <- conjMaybe <$> mapM checkCon props
     return (maybe ProofOriginWrong ProofOriginContext preds, con)
-  where
+    where
     checkCon:: Fom -> Analyzer (Maybe (Entity, Fom))
     checkCon (PredFom pred ty) = do
         mEnt <- lookupEnt $ idStr pred
@@ -221,6 +228,9 @@ buildProofOrigin (StrategyOriginContext con) = do
         then concatMap (extractArgs str) (funArgs fun)
         else [fun]
     extractArgs str expr = [expr]
+
+buildProofOrigin (StrategyOriginFom fom) = return (ProofOriginFom fom, fom)
+buildProofOrigin StrategyOriginWrong = return (ProofOriginWrong, UnknownFom)
 
 buildProofCommand:: Fom -> Command -> Fom -> Analyzer ProofCommand
 buildProofCommand trg StepCmd goal = do
@@ -262,17 +272,20 @@ buildProofProcess trg (AssumeRewrite cmd assume main) = do
     let lastFom = implies assume (prfEnd mainProof)
     return (AssumeProcess proofCmd assume mainProof, lastFom)
 
+buildProofProcess trg WrongRewrite = return (WrongProcess, UnknownFom)
+
 buildProof:: Strategy -> Analyzer Proof
 buildProof (Strategy stOrg rews) = do
     (org , begin) <- buildProofOrigin stOrg
-    (list, end  ) <- buildProofProcessList begin rews
+    (list, end) <- buildProofProcessList begin rews
     return $ Proof org list begin end
-  where
+    where
     buildProofProcessList:: Fom -> [StrategyRewrite] -> Analyzer ([ProofProcess], Fom)
-    buildProofProcessList trg (x : xs) = do
+    buildProofProcessList trg [] = return ([], trg)
+    buildProofProcessList trg (x:xs) = do
         (proc, goal) <- buildProofProcess trg x
-        (rest, end ) <- buildProofProcessList goal xs
-        return (proc : rest, end)
+        (rest, end) <- buildProofProcessList goal xs
+        return (proc:rest, end)
 
 loadProof:: [IdentStm] -> Analyzer Proof
 loadProof stms = do
@@ -294,7 +307,6 @@ loadVarDec (id, exp) = do
 loadVarDecs:: [[(Ident, Expr)]] -> Analyzer ()
 loadVarDecs = mapM_ (mapM_ loadVarDec)
 
--- reflect a declaration in the global scope and analyze type and proof
 loadDecla:: Decla -> Analyzer ()
 loadDecla (Theorem decs prop stms) = subScope $ do
     loadVarDecs decs
@@ -322,7 +334,7 @@ loadDecla (Define id decs ret def) = subScope $ do
 loadDecla (DataType id def) = do
     insertEnt True id TypeOfType
     mapM_ insertCstr $ extractArgs "|" def
-  where
+    where
     tyFom = makeType (idStr id)
     insertCstr:: Expr -> Analyzer ()
     insertCstr (IdentExpr id) = insertEnt True id tyFom
@@ -330,9 +342,11 @@ loadDecla (DataType id def) = do
         mArgs <- mapM buildFom args
         mapM_ checkType mArgs
         case conjMaybe mArgs of
-            Just args -> return FunTypeFom { funTypeIdent=id, funArgTypes=args, funRetType=TypeOfType }
-            Nothing -> return Nothing
-      where
+            Just args -> do
+                let ty = FunTypeFom { funTypeIdent=id, funArgTypes=args, funRetType=TypeOfType }
+                insertEnt True id ty
+            Nothing -> return ()
+        where
         checkType:: Maybe Fom -> Analyzer ()
         checkType (Just fom) = when (evalType fom /= TypeOfType) (analyzeError id "This is not Type")
         checkType Nothing = return ()

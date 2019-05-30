@@ -1,4 +1,4 @@
-module Parser(parseProgram, parseExprs) where
+module Parser(tokenize, parseProgram, parseExprs) where
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -17,40 +17,31 @@ popToken:: Lexer (Maybe PosToken)
 popToken = Lexer $ \(pos, all) -> case all of 
     [] -> ([], pos, [], Just $ PosToken pos EndToken)
     (x:xs)
-        | isDigit x -> make (NumberToken . read) isDigit
-        | isIdentHead x -> make IdentToken isIdentBody
-        | isOperator x -> make OperatorToken isOperator
+        | isDigit x -> procAll (NumberToken . read) isDigit
+        | isIdentHead x -> procAll IdentToken isIdentBody
+        | isOperator x -> procAll OperatorToken isOperator
         | isSymbol x -> ([], nextChar pos, xs, Just $ PosToken pos $ toSymbol [x])
-        | x == '"' -> makeQuote StringToken ('"' /=)
+        | x == '"' -> procQuote StringToken ('"' /=)
+        | x == '\'' -> procQuote StringToken ('\'' /=)
         | x == '#' -> let (t, rest) = span ('\n' /=) xs in ([], stepChar pos $ length t, rest, Nothing) 
-        | x == '\'' -> makeQuoteOne toChar ('\'' /=)
         | x == '\n' -> ([], nextLine pos, xs, Nothing)
         | isSpace x -> ([], nextChar pos, xs, Nothing)
         | otherwise -> ([Message (Ident pos [x]) "wrong"], nextChar pos, xs, Nothing)
         where
-        procAll:: [Message] -> (String -> Maybe Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
-        procAll msgs cstr cond = (msgs, pos, rest, cstr (x:chars) >>= Just . PosToken pos) where
-            pos = stepChar pos $ length chars
+        procAll:: (String -> Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
+        procAll cstr cond = ([], newPos, rest, Just $ PosToken pos $ cstr (x:chars)) where
+            newPos = stepChar pos $ length chars
             (chars, rest) = span cond xs
-        procQuote:: [Message] -> (String -> Maybe Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
-        procQuote msgs cstr cond = (msgs, pos, rest, cstr chars >>= Just . PosToken pos) where
-            pos = stepChar pos $ length chars
-            (chars, _:rest) = span cond xs
-        make cstr = procAll [] $ Just . cstr
-        makeQuote cstr = case all of
-            [] -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
-            _ -> procQuote [] $ Just . cstr
-        makeQuoteOne cstr = case all of
-            [] -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
-            [x] -> procQuote [] $ Just . cstr
-            (x:xs) -> procQuote [Message (Ident pos [x]) "error"] (const Nothing)
+        procQuote:: (String -> Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
+        procQuote cstr cond = case span cond xs of
+            (chars, _:rest) -> ([], stepChar pos $ length chars, rest, Just $ PosToken pos $ cstr chars)
+            (chars, _) -> ([Message (Ident pos []) "not"], pos, [], Just $ PosToken pos $ cstr chars)
     where
     -- Char -> Bool
     [isIdentSymbol, isOperator, isSymbol] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&%", "(){}[],:"]
     [isIdentHead, isIdentBody] = map any [[isLetter, ('_' ==)], [isLetter, isDigit, isIdentSymbol]]
         where any = F.foldr ((<*>) . (<$>) (||)) $ const False
     -- String -> Token
-    toChar all = case all of [x] -> CharToken x; 
     toSymbol all = case all of "(" -> ParenOpen; ")" -> ParenClose; "," -> Comma; _ -> SymbolToken all
 
 -- string to tokens
@@ -63,6 +54,19 @@ tokenize = do
             rest <- tokenize
             return $ token:rest
         Nothing -> tokenize
+
+toEmbString:: String -> EmbString
+toEmbString ['$'] = [EmbVar 1]
+toEmbString ('$':(x:xs)) = if isNumber x then EmbVar (read [x]):toEmbString xs else EmbVar 1:toEmbString (x:xs)
+toEmbString (x:xs) = case toEmbString xs of
+    (EmbStr str:ys) -> EmbStr (x:str):ys
+    ys -> EmbStr [x]:ys
+toEmbString x = [EmbStr x]
+
+parseEmbString:: Parser (Maybe EmbString)
+parseEmbString = do
+    str <- parseStringToken
+    return $ toEmbString <$> str 
 
 -- parse expression by shunting yard algorithm
 parseExpr:: OpeMap -> Parser (Maybe Expr)
@@ -85,7 +89,7 @@ parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
         OperatorToken ope -> parseExpr xs ((px, narg):rest) $ makeExpr opes q where
             (msg, (narg, preceed, lassoc)) = getOpe $ Ident pos ope
             (opes, rest) = span (precederEq (preceed, lassoc) . fst) s
-        SymbolToken{}     -> result
+        SymbolToken{}   -> result
         where
             isParenOpen = \case PosToken _ ParenOpen -> True; _ -> False
             result = ([], all, Just $ head $ makeExpr s q)
@@ -128,6 +132,11 @@ parseNumber:: Parser (Maybe Int)
 parseNumber = Parser $ \case
     [] -> ([], [], Nothing)
     all@(PosToken _ t:ts) -> case t of NumberToken n-> ([], ts, Just n); _-> ([], all, Nothing)
+
+parseStringToken:: Parser (Maybe String)
+parseStringToken = Parser $ \case
+    [] -> ([], [], Nothing)
+    all@(PosToken _ t:ts) -> case t of StringToken n-> ([], ts, Just n); _-> ([], all, Nothing)
 
 parseIdent:: Parser (Maybe Ident)
 parseIdent = Parser $ \case
@@ -176,8 +185,8 @@ former <!!> latter = former >>= \case
 
 parseSequence:: Parser (Maybe a) -> Parser [a]
 parseSequence p = p >>= \case
-    Just x' -> parseSequence p >>= return . (x':)
-    Nothing -> return $ []
+    Just x' -> (x':) <$> parseSequence p
+    Nothing -> return []
 
 parseCommaSeparated:: Parser (Maybe a) -> Parser [a]
 parseCommaSeparated = parseSeparated $ parseToken Comma
@@ -219,8 +228,8 @@ parseVarDecs omap = fmap (Just . conv) parse
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 parseParenVarDecsSet omap = fmap Just $ parseSequence $ parseParenVarDecs omap
 
-parseLatex:: OpeMap -> Parser (Maybe Expr)
-parseLatex omap = return (Just id) <::> parseToken (IdentToken "proof") <::> parseSymbol "(" <++> parseExpr omap <::> parseSymbol ")"
+parseLatex:: Parser (Maybe EmbString)
+parseLatex = return (Just id) <::> parseToken (IdentToken "latex") <::> parseSymbol "(" <++> parseEmbString <::> parseSymbol ")"
 
 parseDeclaBody:: OpeMap -> String -> Parser (Maybe Decla)
 parseDeclaBody omap "axiom" = return (Just Axiom)
@@ -245,7 +254,7 @@ parseDeclaBody omap "predicate" = return (Just Predicate)
 parseDeclaBody omap "data" = return (Just DataType)
     <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
 parseDeclaBody omap "undef" = return (Just Undef)
-    <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex omap
+    <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex
 parseDeclaBody omap "infixl" = return (Just (InfixDecla True 2))
     <++> parseNumber <++> parseAnyOperator
 parseDeclaBody omap "infixr" = return (Just (InfixDecla False 2))
@@ -283,4 +292,5 @@ parser p t = (\(_, _, x)-> x) $ runParser p t
 tokenizeTest line = intercalate "," $ map show $ lexer line
 parserTest x = show . parser x . lexer
 
-parseExprs str omap = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str)
+parseExprs:: OpeMap -> String -> [Expr]
+parseExprs omap str = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str)

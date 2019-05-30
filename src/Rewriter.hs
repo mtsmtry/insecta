@@ -151,6 +151,7 @@ applyDiff derivater pair@(fun@(FunFom _ ty f as), FunFom _ ty' g bs) = if f == g
             encount':: Eq a => (Int, Int) -> a -> [a] -> (Int, Int)
             encount' (i, n) e (x:xs) = encount' (if n > 0 then i else i + 1, if e == x then n + 1 else n) e xs
             encount' p _ [] = p
+applyDiff derivater (a, b) = derivater (a, b)
 
 derivate:: Derivater
 derivate = applyDiff derivateByRuleList where

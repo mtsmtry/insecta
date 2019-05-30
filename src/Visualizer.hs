@@ -61,12 +61,19 @@ showFunFom opem fshow f args = if isAlpha (head f)
     bshow fom = fshow opem fom
 
 showFom:: OpeMap -> Fom -> String
+showFom opem (PredFom id ty) = idStr id ++ "." ++ showFom opem ty
+showFom opem UnknownFom = "unknown"
+showFom opem TypeOfType = "Type"
 showFom opem (StrFom id) = "\"" ++ idStr id ++ "\"" 
 showFom opem (NumFom (IdentInt _ num)) = show num
 showFom opem (VarFom id _) = idStr id
 showFom opem (CstFom id _) = idStr id
 showFom opem fun@FunFom{} = showFunFom opem showFom (idStr $ funName fun) (funArgs fun)
 showFom opem rew@Rewrite{} = "[" ++ showFom opem (rewOlder rew) ++ ", " ++ showFom opem (rewLater rew) ++ "]"
+showFom opem (FunTypeFom id args ret) = argStr ++ "->" ++ showFom opem ret where 
+    argStr = case args of
+        [arg] -> showFom opem arg
+        _ -> "(" ++ intercalate ", " (map (showFom opem) args) ++ ")"
 
 showLatestFom opem rew@Rewrite{} = showLatestFom opem (rewLater rew)
 showLatestFom opem fun@FunFom{} = showFunFom opem showLatestFom (idStr $ funName fun) (funArgs fun)
@@ -87,3 +94,15 @@ showFomAsRewrites opem fom = showFom opem fom
 
 evalString:: Expr -> String
 evalString e = ""
+
+showMapList:: Show a => (t -> [Char]) -> [(a, t)] -> [Char]
+showMapList showValue xs = intercalate "\n" (map (\(k, v)-> show k ++ ":" ++ showValue v) xs) ++ "\n"
+
+showEntity:: OpeMap -> Entity -> String
+showEntity omap ent = "Type:" ++ showFom omap (entType ent) ++ ", IsConst:" ++ show (entConst ent)
+
+showContext:: Context -> String
+showContext con = showMapList (showEntity omap) (M.toList $ conEnt con)
+    ++ showMapList (intercalate "\n" . map (showRule omap)) (M.toList $ conSimp con)
+    ++ showMapList (intercalate "\n" . map (showRule omap)) (M.toList $ conImpl con)
+    ++ show (conList con) where omap = conOpe con

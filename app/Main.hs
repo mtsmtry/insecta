@@ -7,7 +7,9 @@ import Data.Aeson.Embedded
 import Test
 
 main :: IO ()
-main = testFunc
+main = do 
+  testFunc
+  main
 -- main = apiGatewayMain handler
 
 handler :: APIGatewayProxyRequest (Embedded Value) -> IO (APIGatewayProxyResponse (Embedded [String]))

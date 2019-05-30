@@ -10,42 +10,56 @@ import Library
 import Analyzer
 import Data
 import Visualizer
+import Rewriter
 
-showContext ctx = toJsonFormatedWith show (ctxScope ctx) ++ "\n"
-    ++ show (ctxOMap ctx) ++ "\n"
-    ++ toJsonFormatedWith (showr " >>= ") (ctxSRule ctx) ++ "\n"
-    ++ toJsonFormatedWith (showr " => ") (ctxIRule ctx) ++ "\n"
-    ++ show (ctxSimps ctx)
-    where
-    showr s x = "[" ++ intercalate ", " (map (showRule s) x) ++ "]"
-    showRule s (a, b) = showExpr (ctxOMap ctx) a ++ s ++ showExpr (ctxOMap ctx) b
+showMsgs msgs = intercalate "\n" $ map show msgs
 
-showMessages msgs = intercalate "\n" $ map show msgs
+toTokens:: String -> [PosToken]
+toTokens str = toks where
+    (msgs, pos, rest, toks) = runLexer tokenize (initialPosition, str)
+
+tokenizeTest:: String -> String
+tokenizeTest str = show toks ++ "\n" ++ showMsgs msgs where
+    (msgs, pos, rest, toks) = runLexer tokenize (initialPosition, str)
+
+parseExprTest:: String -> String
+parseExprTest str = show $ parseExprs M.empty str
+
+buildTest:: String -> String
+buildTest str = showContext con ++ "\n" ++ showMsgs msgs where 
+    (msgs, con) = buildProgram str
 
 reasoningTest:: String -> String -> String
-reasoningTest prg str = showMessages msg ++ "\n" ++ showContext ctx ++ "\n" ++ out where
-    (msg, ctx) = buildProgram prg
-    nexprs = parseExprs str (ctxOMap ctx)
-    (_, _, exprs) = (analyze $ mapM typeExpr nexprs) ctx
-    out = case exprs of
-        [Just a, Just b] -> showRewriteList (ctxOMap ctx) (toRewriteList (ctxOMap ctx) expr) where
-            mexpr = derivate (ctxIRule ctx) (a, b)
-            expr = fromMaybe (NumberExpr NonePosition 0)  mexpr
-        [Just input] -> showLatestExpr (ctxOMap ctx) expr ++ "\n" 
-            ++ showExpr (ctxOMap ctx) expr ++ "\n" 
-            ++ showExprAsRewrites (ctxOMap ctx) expr ++ "\n" 
-            ++ showRewriteList (ctxOMap ctx) (toRewriteList (ctxOMap ctx) expr) where
-            expr = simplify (ctxSRule ctx) input
-        _ -> error $ show exprs
+reasoningTest prg str = showContext con ++ "\n" ++ showMsgs (msgs ++ msgs') ++ "\n" ++ res where
+    (msgs, con) = buildProgram prg
+    (msgs', _, res) = analyze (reasoning str) con
 
-unifyTest:: String -> String
-unifyTest str = out where
-    exprs = parseExprs str M.empty
-    [a, b] = exprs
-    out = show $ unify a b
+reasoning:: String -> Analyzer String
+reasoning str = do
+    omap <- fmap conOpe getContext
+    let exps = if str == [] then [] else parseExprs omap str
+    foms <- mapM (buildFomEx AllowUndefined) exps
+    case foms of
+        [Just fom] -> do
+            let fomStr = show fom
+            res <- simplify fom
+            return $ fomStr ++ "\n" ++ showFom omap res
+        [Just a, Just b] -> do
+            let fomStr = show a
+            res <- derivate (a, b)
+            return $ fomStr ++ "\n" ++ maybe "Nothing" (showFom omap) res
+        _ -> return ""
 
 test x = forever $ getLine >>= (putStrLn . x)
 -- testFunc2 = test $ parserTest $ parseExpr M.empty
+
+testFunc2 = do
+    str <- getLine
+    putStrLn $ buildTest str
+
 testFunc = do
     file <- readFile "test.txt"
-    test $ reasoningTest file
+    str <- getLine
+    putStrLn $ reasoningTest file str
+    return ()
+    -- test $ reasoningTest file

@@ -18,17 +18,17 @@ infixl 2 =>
 infixl 2 ->
 infixl 1 <=>
 
-data N = O | S(N)
+data N = Zero | Succ(N)
 undef R: Type
 
-undef operator +: (N, N)->N
-undef operator *: (N, N)->N
-undef operator =>: (Prop, Prop)->Prop
-undef operator &: (Prop, Prop)->Prop
-undef operator |: (Prop, Prop)->Prop
-undef operator ~: Prop->Prop
-undef inv: R->R
-undef mns: R->R
+undef operator +: (N, N)->N latex("+")
+undef operator *: (N, N)->N latex("\cdot")
+undef operator =>: (Prop, Prop)->Prop latex("\rightarrow")
+undef operator &: (Prop, Prop)->Prop latex("\land")
+undef operator |: (Prop, Prop)->Prop latex("\lir")
+undef operator ~: Prop->Prop latex("\lnot")
+undef inv: R->R latex("$1^(-1)")
+undef mns: R->R latex("-")
 
 axiom (a: N) {
     a + 0 >>= a
@@ -49,16 +49,16 @@ axiom (A: Prop, B: Prop) {
 undef True: Prop
 undef False: Prop
 
-axiom () {
-	(~False) >>= True
+axiom {
+	~False >>= True
 }
 
-axiom () {
-	(~True) >>= False
+axiom {
+	~True >>= False
 }
 
 axiom (A: Prop) {
-    (~(~A)) >>= A
+    ~(~A) >>= A
 }
 
 #axiom (A, B: Prop) {
@@ -92,6 +92,14 @@ axiom (A: Prop) {
 
 axiom (A: Prop) {
 	A | True >>= True
+}
+
+axiom (A: Prop) {
+	A & A >>= A
+}
+
+axiom (A: Prop) {
+	A | A >>= A
 }
 
 axiom (A: Prop, B: Prop) {

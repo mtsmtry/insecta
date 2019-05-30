@@ -82,8 +82,7 @@ type OpeMap = M.Map String (Int, Int, Bool) -- (argument number, preceed, is lef
 -- Token
 data Token = IdentToken String 
     | NumberToken Int 
-    | StringToken String 
-    | CharToken Char
+    | StringToken String
     | SymbolToken String 
     | OperatorToken String
     | Comma
@@ -97,7 +96,6 @@ showToken (OperatorToken s) = s
 showToken (IdentToken s) = s
 showToken (NumberToken n) = show n
 showToken (StringToken s) = '"':s ++ "\""
-showToken (CharToken s) = ['\'', s, '\'']
 showToken Comma = ","
 showToken ParenOpen = "("
 showToken ParenClose = ")"
@@ -109,6 +107,9 @@ instance Eq Ident where
 data IdentInt = IdentInt { idNumPos::Position, idNum::Int } deriving (Show)
 instance Eq IdentInt where
     a == b = idNum a == idNum b
+
+data EmbPart = EmbVar Int | EmbStr String deriving (Show)
+type EmbString = [EmbPart]
 
 -- Expression
 data Expr = IdentExpr Ident
@@ -197,13 +198,13 @@ data Decla = Axiom [VarDec] Expr
     | Define Ident [VarDec] Expr Expr
     | Predicate Ident Ident Expr [VarDec] Expr
     | DataType Ident Expr 
-    | Undef Ident Expr (Maybe Expr)
+    | Undef Ident Expr (Maybe EmbString)
     | InfixDecla Bool Int Int Ident deriving (Show)
 
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 
-data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::String }
+data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::EmbString }
     | PredicateEntity { predSelf::String, predExtend::Fom, predDef::Fom }  deriving (Show)
     
 data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
@@ -221,11 +222,11 @@ data Strategy = Strategy StrategyOrigin [StrategyRewrite] deriving (Show)
 
 data ProofCommand = ProofCommand { prfCmdCmd::Command, prfCmdRewrite::Fom } deriving (Show)
 data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess deriving (Show)
-data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginLeft Fom | ProofOriginWrong deriving (Show)
+data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginFom Fom | ProofOriginLeft Fom | ProofOriginWrong deriving (Show)
 data Proof = Proof { prfOrigin::ProofOrigin, prfProcesses::[ProofProcess], prfBegin::Fom, prfEnd::Fom } deriving (Show)
 
-data Quantifier = ForAll | Exists [Ident]
-data Variable = Variable Quantifier Fom
+data Quantifier = ForAll | Exists [Ident] deriving (Show)
+data Variable = Variable Quantifier Fom deriving (Show)
 type VarMap = M.Map String Variable
 
 -- Context
@@ -251,7 +252,7 @@ newContext omap = Context {
         conImpl=M.empty,
         conEnt=buildInScope }
     where
-    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex="" }
+    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=[] }
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
 
@@ -282,8 +283,8 @@ analyzeError:: Ident -> String -> Analyzer ()
 analyzeError ps str = Analyzer ([Message ps str], , ())
 
 insertEnt:: Bool -> Ident -> Fom -> Analyzer ()
-insertEnt const id ty = updateEnt $ M.insert (show id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex="" })
+insertEnt const id ty = updateEnt $ M.insert (idStr id) 
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=[] })
 
 lookupEnt:: String -> Analyzer (Maybe Entity)
 lookupEnt str = do
