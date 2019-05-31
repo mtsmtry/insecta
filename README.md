@@ -22,7 +22,7 @@ proof:
         impl dist(a*b, f(n)*g(n)) <= abs(a*(b-g(n))) + abs(g(n)*(a-f(n)))
         step dist(a*b, f(n)*g(n)) <= abs(a)*dist(b, g(n)) + abs(g(n))*dist(a, f(n))
         step dist(a*b, f(n)*g(n)) <= eps
-	}
+    }
 }
 ```
 - Coq　

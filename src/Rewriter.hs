@@ -107,9 +107,11 @@ unifyList f (x:xs) trg = case unify (f x) trg of
 
 assign:: AssignMap -> Fom -> Fom
 assign m fom@(VarFom id ty) = fromMaybe fom $ M.lookup (idStr id) m
-assign m fom@(FunFom (ACFun name) _ _ _) = case M.lookup name m of
-    Just rest -> fom{funArgs=[applyArgs (assign m) fom, rest]}
-    Nothing -> applyArgs (assign m) fom
+assign m fom@(FunFom (ACFun name) _ _ args@(x:xs)) = case M.lookup name m of
+    Just rest -> fom{funArgs=[main, rest]}
+    Nothing -> main
+    where
+    main = if null xs then assign m x else applyArgs (assign m) fom
 assign m fom@FunFom{} = applyArgs (assign m) fom
 assign m fom = fom
 
