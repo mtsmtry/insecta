@@ -189,8 +189,20 @@ applyArgsOnce apply fun@FunFom{} = do
 
 -- Rewriting
 data RuleKind = SimpRule | ImplRule deriving (Eq, Show)
+data PredRule = PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
 data Rule = Rule{ ruleKind::RuleKind, ruleIdent::Ident, ruleProof::Maybe Proof, ruleLabel::String, ruleBf::Fom, ruleAf::Fom } deriving (Show)
 type AssignMap = M.Map String Fom
+type RuleMap = M.Map String [Rule]
+type PredRuleMap = M.Map String (M.Map String [PredRule])
+
+insertPredRuleToMap:: PredRule -> PredRuleMap -> PredRuleMap
+insertPredRuleToMap rule = M.alter updatePredMap (predRulePredName rule) where
+    updatePredMap map = Just $ maybe M.empty (M.alter updateTrgList $ predRuleTrgLabel rule) map
+    updateTrgList list = Just $ maybe [] (rule:) list
+
+insertRuleToMap:: Rule -> RuleMap -> RuleMap
+insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
+    updateList list = Just $ maybe [] (rule:) list
 
 -- Program
 data Decla = Axiom [VarDec] Expr 
@@ -204,8 +216,8 @@ data Decla = Axiom [VarDec] Expr
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 
-data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::EmbString }
-    | PredicateEntity { predSelf::String, predExtend::Fom, predDef::Fom }  deriving (Show)
+data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString }
+    | PredEntity { predSelf::String, predExtend::Fom, predDef::Fom, predName::String }  deriving (Show)
     
 data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
 data IdentCmd = IdentCmd Ident Command deriving (Show)
@@ -230,7 +242,6 @@ data Variable = Variable Quantifier Fom deriving (Show)
 type VarMap = M.Map String Variable
 
 -- Context
-type RuleMap = M.Map String [Rule]
 type Simplicity = [String] -- functions ordered by simplicity
 type EntityMap = M.Map String Entity
 type LatexMap = M.Map String Fom
@@ -241,7 +252,8 @@ data Context = Context {
     conList::Simplicity,
     conSimp::RuleMap, 
     conImpl::RuleMap,
-    conEnt::EntityMap }
+    conEnt::EntityMap,
+    conPred::PredRuleMap }
     
 newContext:: OpeMap -> Context
 newContext omap = Context { 
@@ -250,9 +262,10 @@ newContext omap = Context {
         conList=[],
         conSimp=M.empty, 
         conImpl=M.empty,
-        conEnt=buildInScope }
+        conEnt=buildInScope,
+        conPred=M.empty }
     where
-    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=[] }
+    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=Nothing }
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
 
@@ -284,9 +297,18 @@ analyzeError ps str = Analyzer ([Message ps str], , ())
 
 insertEnt:: Bool -> Ident -> Fom -> Analyzer ()
 insertEnt const id ty = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=[] })
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing })
+
+insertEntWithLatex:: Bool -> Ident -> Fom -> Maybe EmbString -> Analyzer ()
+insertEntWithLatex const id ty latex = updateEnt $ M.insert (idStr id) 
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=latex })
 
 lookupEnt:: String -> Analyzer (Maybe Entity)
 lookupEnt str = do
     emap <- fmap conEnt getContext
     return $ M.lookup str emap
+
+lookupPredRules:: String -> String -> Analyzer [PredRule]
+lookupPredRules pred trg = do
+    rmap <- fmap conPred getContext
+    return $ fromMaybe [] $ M.lookup pred rmap >>= M.lookup trg

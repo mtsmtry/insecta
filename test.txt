@@ -1,34 +1,34 @@
 
 infixl 10 ^
-infixl 9 *
-infixl 9 /
-infixl 8 %
-infixl 8 +
-infixl 8 -
-infixl 7 =
-infixl 7 <
-infixl 7 >
-infixl 7 <=
-infixl 7 >=
-unaryr 6 ~
-infixl 5 &
-infixl 4 |
-infixl 3 =
-infixl 2 =>
-infixl 2 ->
-infixl 1 <=>
+infixl 9  *
+infixl 9  /
+infixl 8  %
+infixl 8  +
+infixl 8  -
+infixl 7  =
+infixl 7  <
+infixl 7  >
+infixl 7  <=
+infixl 7  >=
+unaryr 6  ~
+infixl 5  &
+infixl 4  |
+infixl 3  =
+infixl 2  =>
+infixl 2  ->
+infixl 1  <=>
 
 data N = Zero | Succ(N)
 undef R: Type
 
-undef operator +: (N, N)->N latex("+")
-undef operator *: (N, N)->N latex("\cdot")
-undef operator =>: (Prop, Prop)->Prop latex("\rightarrow")
-undef operator &: (Prop, Prop)->Prop latex("\land")
-undef operator |: (Prop, Prop)->Prop latex("\lir")
-undef operator ~: Prop->Prop latex("\lnot")
-undef inv: R->R latex("$1^(-1)")
-undef mns: R->R latex("-")
+undef operator +	: (N, N)->N 			latex "+" 
+undef operator *	: (N, N)->N 			latex "\cdot"
+undef operator =>	: (Prop, Prop)->Prop 	latex "\rightarrow"
+undef operator &	: (Prop, Prop)->Prop 	latex "\land"
+undef operator |	: (Prop, Prop)->Prop 	latex "\lir"
+undef operator ~	: Prop->Prop 			latex "\lnot"
+undef inv			: R->R 					latex "$^{-1}"
+undef mns			: R->R 					latex "-"
 
 axiom (a: N) {
     a + 0 >>= a
@@ -46,8 +46,8 @@ axiom (A: Prop, B: Prop) {
     A & B => A
 }
 
-undef True: Prop
-undef False: Prop
+undef True	: Prop
+undef False	: Prop
 
 axiom {
 	~False >>= True

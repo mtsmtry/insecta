@@ -17,6 +17,27 @@ a <||> b = \m-> a m <|> b m
 (<&&>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <&&> b = \m-> a m >>= \m'-> b m'
 
+convert:: Fom -> Fom -> Analyzer Bool
+convert from to = if from == to 
+    then return True
+    else do
+        fromEnt <- lookupEnt (idStr $ showIdent from)
+        toEnt <- lookupEnt (idStr $ showIdent to)
+        fromMaybe (return False) $ cast to <$> fromEnt <*> toEnt
+    where
+    cast:: Fom -> Entity -> Entity -> Analyzer Bool
+    cast trg from@PredEntity{} to@Entity{} = return $ predExtend from == trg
+    cast trg from@Entity{} to@PredEntity{} = do
+        rules <- lookupPredRules (predName to) (idStr $ showIdent trg)
+        case unifyList predRuleTrg rules trg of
+            Just (asg, rule) -> return True
+            Nothing -> return False
+
+unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
+unifyList f (x:xs) trg = case unify (f x) trg of
+    Just asg -> Just (asg, x)
+    Nothing -> unifyList f xs trg
+
 unify:: Fom -> Fom -> Maybe AssignMap
 unify ptn trg = unifym ptn trg M.empty
 

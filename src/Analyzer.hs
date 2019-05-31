@@ -122,14 +122,14 @@ buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = do
 buildRule expr = analyzeErrorM (showExprIdent expr) "Invaild rule"
 
 returnMessage:: a -> Message -> Analyzer a
-returnMessage a m = Analyzer $ \ctx-> ([m], ctx, a)
+returnMessage a m = Analyzer ([m], , a)
 
 insertRule:: Rule -> Analyzer ()
 insertRule rule = case ruleKind rule of
     SimpRule -> do
         insertSimp (ruleIdent rule) (ruleBf rule) (ruleAf rule)
-        updateSimp $ M.insertWith (++) (ruleLabel rule) [rule]
-    ImplRule -> updateImpl $ M.insertWith (++) (ruleLabel rule) [rule]
+        updateSimp $ insertRuleToMap rule
+    ImplRule -> updateImpl $ insertRuleToMap rule
 
 loadRule:: Expr -> Maybe Proof -> Analyzer ()
 loadRule exp prf = do
@@ -319,7 +319,7 @@ loadDecla (Axiom decs prop) = subScope $ do
 
 loadDecla (Undef id ty mTex) = do
     mTy <- buildFom ty
-    maybe (return ()) (insertEnt True id) mTy
+    maybe (return ()) (\ty-> insertEntWithLatex True id ty mTex) mTy
     
 loadDecla (Define id decs ret def) = subScope $ do
     loadVarDecs decs

@@ -229,7 +229,7 @@ parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVa
 parseParenVarDecsSet omap = fmap Just $ parseSequence $ parseParenVarDecs omap
 
 parseLatex:: Parser (Maybe EmbString)
-parseLatex = return (Just id) <::> parseToken (IdentToken "latex") <::> parseSymbol "(" <++> parseEmbString <::> parseSymbol ")"
+parseLatex = return (Just id) <::> parseToken (IdentToken "latex") <++> parseEmbString
 
 parseDeclaBody:: OpeMap -> String -> Parser (Maybe Decla)
 parseDeclaBody omap "axiom" = return (Just Axiom)
