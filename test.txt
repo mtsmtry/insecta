@@ -30,73 +30,34 @@ undef operator ~	: Prop->Prop 			latex "\lnot"
 undef inv			: R->R 					latex "$^{-1}"
 undef mns			: R->R 					latex "-"
 
-axiom (a: N) {
-    a + 0 >>= a
-}
+axiom (a, b: N) 	{ a + b = b + a }
+axiom (a, b, c: N) 	{ a + (b + c) = (a + b) + c }
+axiom (a, b: N) 	{ a * b = b * a }
+axiom (a, b, c: N) 	{ a * (b * c) = (a * b) * c }
 
-axiom (a: N) {
-    a * 0 >>= 0
-}
-
-axiom (a: N) {
-    a * 1 >>= a
-}
-
-axiom (A: Prop, B: Prop) {
-    A & B => A
-}
+axiom (a: N) { a + 0 >>= a }
+axiom (a: N) { a * 0 >>= 0 }
+axiom (a: N) { a * 1 >>= a }
+axiom (A: Prop, B: Prop) { A & B => A }
 
 undef True	: Prop
 undef False	: Prop
 
-axiom {
-	~False >>= True
-}
+axiom { ~False >>= True }
+axiom { ~True >>= False }
 
-axiom {
-	~True >>= False
-}
+axiom (A: Prop) { ~(~A) >>= A }
 
-axiom (A: Prop) {
-    ~(~A) >>= A
-}
+axiom (A, B: Prop) 		{ A & B = B & A }
+axiom (A, B, C: Prop) 	{ A & (B & C) <=> (A & B) & C }
+axiom (A, B: Prop) 		{ A | B <=> B | A }
+axiom (A, B, C: Prop) 	{ A | (B | C) <=> (A | B) | C }
 
-#axiom (A, B: Prop) {
-#	A & B = B & A
-#}
-
-#axiom (A, B, C: Prop) {
-#	A & (B & C) = (A & B) & C
-#}
-
-#axiom (A, B: Prop) {
-#	A | B = B | A
-#}
-
-#axiom (A, B, C: Prop) {
-#	A | (B | C) = (A | B) | C
-#}
-
-
-axiom (A: Prop, B: Prop, C: Prop) {
-	A & (B | C) >>= A & B | A & C
-}
-
-axiom (A: Prop, B: Prop, C: Prop) {
-	(A | B) & C >>= A & C | B & C
-}
-
-axiom (A: Prop) {
-	A & True >>= A
-}
-
-axiom (A: Prop) {
-	A | True >>= True
-}
-
-axiom (A: Prop) {
-	A & A >>= A
-}
+axiom (A: Prop, B: Prop, C: Prop) { A & (B | C) >>= A & B | A & C }
+axiom (A: Prop, B: Prop, C: Prop) { (A | B) & C >>= A & C | B & C }
+axiom (A: Prop) { A & True >>= A }
+axiom (A: Prop) { A | True >>= True }
+axiom (A: Prop) { A & A >>= A }
 
 axiom (A: Prop) {
 	A | A >>= A

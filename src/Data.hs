@@ -167,11 +167,11 @@ makeType str = CstFom{cstName=Ident NonePosition str, cstType=TypeOfType}
 propType = makeType "Prop"
 
 latestFom:: Fom -> Fom
-latestFom fom@Rewrite{} = rewLater fom
+latestFom fom@Rewrite{} = latestFom $ rewLater fom
 latestFom fom = fom 
 
 oldestFom:: Fom -> Fom
-oldestFom fom@Rewrite{} = rewOlder fom
+oldestFom fom@Rewrite{} = oldestFom $ rewOlder fom
 oldestFom fom = fom
 
 applyArgs:: (Fom -> Fom) -> Fom -> Fom
@@ -188,7 +188,7 @@ applyArgsOnce apply fun@FunFom{} = do
     applyOnce (a:as) as' = maybe (applyOnce as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (apply a)
 
 -- Rewriting
-data RuleKind = SimpRule | ImplRule deriving (Eq, Show)
+data RuleKind = SimpRule | ImplRule | EqualRule deriving (Eq, Show)
 data PredRule = PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
 data Rule = Rule{ ruleKind::RuleKind, ruleIdent::Ident, ruleProof::Maybe Proof, ruleLabel::String, ruleBf::Fom, ruleAf::Fom } deriving (Show)
 type AssignMap = M.Map String Fom
@@ -198,11 +198,11 @@ type PredRuleMap = M.Map String (M.Map String [PredRule])
 insertPredRuleToMap:: PredRule -> PredRuleMap -> PredRuleMap
 insertPredRuleToMap rule = M.alter updatePredMap (predRulePredName rule) where
     updatePredMap map = Just $ maybe M.empty (M.alter updateTrgList $ predRuleTrgLabel rule) map
-    updateTrgList list = Just $ maybe [] (rule:) list
+    updateTrgList list = Just $ maybe [rule] (rule:) list
 
 insertRuleToMap:: Rule -> RuleMap -> RuleMap
 insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
-    updateList list = Just $ maybe [] (rule:) list
+    updateList list = Just $ maybe [rule] (rule:) list
 
 -- Program
 data Decla = Axiom [VarDec] Expr 
@@ -228,9 +228,10 @@ data Statement = CmdStm IdentCmd Expr
     | ExistsStm Ident [Ident] Expr
     | ForAllStm Ident Expr deriving (Show)
 
-data StrategyOrigin = StrategyOriginLeft | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)
+data StrategyOrigin = StrategyOriginAuto | StrategyOriginWhole | StrategyOriginLeft | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)
+data StrategyOriginIdent = StrategyOriginIdent Ident StrategyOrigin deriving (Show)
 data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy | ForkRewrite [(Command, Strategy)] | WrongRewrite deriving (Show)
-data Strategy = Strategy StrategyOrigin [StrategyRewrite] deriving (Show)
+data Strategy = Strategy StrategyOriginIdent [StrategyRewrite] deriving (Show)
 
 data ProofCommand = ProofCommand { prfCmdCmd::Command, prfCmdRewrite::Fom } deriving (Show)
 data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess deriving (Show)

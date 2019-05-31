@@ -104,7 +104,7 @@ showMapList:: Show a => (t -> [Char]) -> [(a, t)] -> [Char]
 showMapList showValue xs = intercalate "\n" (map (\(k, v)-> show k ++ ":" ++ showValue v) xs) ++ "\n"
 
 showEntity:: OpeMap -> Entity -> String
-showEntity omap ent = "Type:" ++ showFom omap (entType ent) ++ ", IsConst:" ++ show (entConst ent)
+showEntity omap ent = "Type:" ++ showFom omap (entType ent) ++ ", IsConst:" ++ show (entConst ent) ++ ", FunAttr:" ++ show (entFunAttr ent)
 
 showContext:: Context -> String
 showContext con = showMapList (showEntity omap) (M.toList $ conEnt con)

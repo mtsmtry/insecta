@@ -22,7 +22,7 @@ isAssociativeRule:: Rule -> Bool
 isAssociativeRule = onRule isAssociative where
     isAssociative:: Fom -> Fom -> Bool
     isAssociative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
-        ([a, b], [c, d]) -> funName bf == funName af && a == c && b == d
+        ([a, b], [c, d]) -> funName bf == funName af && a == d && b == c
         _ -> False
     isAssociative _ _ = False
 
@@ -39,7 +39,7 @@ isCommutativeRule = onRule isCommutative where
         _ -> False
         where
         sameName:: [Fom] -> Bool
-        sameName (x:xs) = let name = funName x in all (\x-> name == funName x) xs
+        sameName (x:xs) = let name = funName x in all (\t-> name == funName t) xs
     isCommutative _ _ = False
 
 data BuildFomOption = AllowUndefined | NotAllowUndefined deriving(Eq, Show)
@@ -61,12 +61,12 @@ buildFomEx opt = buildFom where
                 else return $ Just $ VarFom id (entType ent)
             Nothing -> if opt == AllowUndefined
                 then return $ Just $ VarFom id UnknownFom
-                else analyzeErrorM id "Not defined"
+                else analyzeErrorM id "宣言されていない識別子です"
 
     buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
         mArgs <- mapM buildFom (extractFromTuple arg)
         mRet <- buildFom ret
-        return $ FunTypeFom id <$> (conjMaybe mArgs) <*> mRet
+        return $ FunTypeFom id <$> conjMaybe mArgs <*> mRet
         where
         extractFromTuple:: Expr -> [Expr]
         extractFromTuple (FunExpr (Ident _ "tuple") args) = args
@@ -75,17 +75,17 @@ buildFomEx opt = buildFom where
     buildFom e@(FunExpr id@(Ident pos fun) args) = do
         mEnt <- lookupEnt fun
         mArgs <- mapM buildFom args
-        maybeFlip mEnt (analyzeErrorM id "Not defined") $ \ent-> do
+        maybeFlip mEnt (analyzeErrorM id "宣言されていない識別子です") $ \ent-> do
             let ty = entType ent
             nArgs <- checkFunc ty mArgs
             return $ case ty of
-                tyFun@FunTypeFom{} -> FunFom OFun id (funRetType tyFun) <$> conjMaybe nArgs
+                tyFun@FunTypeFom{} -> FunFom (entFunAttr ent) id (funRetType tyFun) <$> conjMaybe nArgs
                 _ -> Nothing
         where
         checkFunc:: Fom -> [Maybe Fom] -> Analyzer [Maybe Fom]
         checkFunc (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
                 then do
-                    analyzeErrorB id "Argument number wrong"
+                    analyzeErrorB id "引数の数が異なります"
                     return argVls
                 else zipWithM checkType argVls argTys
         checkFunc _ vls = do
@@ -99,7 +99,7 @@ buildFomEx opt = buildFom where
                 vStr <- onOpeMap showFom vl
                 eStr <- onOpeMap showFom vlTy
                 aStr <- onOpeMap showFom ty
-                let msg = vStr ++ ":Couldn't match expected type '" ++ eStr ++ "' with actual type '" ++ aStr ++ "'"
+                let msg = "'" ++ vStr ++ "'は" ++ eStr ++ "'型であると予期しましたが、実際は '" ++ aStr ++ "'型でした"
                 analyzeError (showIdent vl) msg
                 return trg
         checkType _ _ = return Nothing
@@ -110,7 +110,7 @@ getLabel Nothing = Nothing
 
 buildRule:: Expr -> Analyzer (Maybe Rule)
 buildRule (FunExpr id@(Ident _ "=>") [bf, af]) = do
-    let checkType (Just fom) = unless (evalType fom == makeType "Prop") (analyzeError (funName fom) "This is not prop")
+    let checkType (Just fom) = unless (evalType fom == makeType "Prop") (analyzeError (funName fom) "命題ではありません")
         checkType Nothing = return ()
     bfFom <- buildFom bf
     afFom <- buildFom af
@@ -118,52 +118,52 @@ buildRule (FunExpr id@(Ident _ "=>") [bf, af]) = do
     checkType afFom
     return $ Rule ImplRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
 
-buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = do
+buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = makeEqualRule SimpRule id bf af
+buildRule (FunExpr id@(Ident _ "<=>") [bf, af]) = makeEqualRule EqualRule id bf af
+buildRule (FunExpr id@(Ident _ "=") [bf, af]) = makeEqualRule EqualRule id bf af
+
+buildRule exp = analyzeErrorM (showExprIdent exp) "無効なルールです"
+
+makeEqualRule kind id bf af = do
     let checkType (Just bf) (Just af) = evalType bf == evalType af
         checkType _ _ = False
     bfFom <- buildFom bf
     afFom <- buildFom af
     if checkType bfFom afFom
-        then return $ Rule SimpRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
-        else analyzeErrorM id "Not match both type"
-
-buildRule expr = analyzeErrorM (showExprIdent expr) "Invaild rule"
+        then return $ Rule kind id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
+        else analyzeErrorM id "両辺の型が一致しません"
 
 returnMessage:: a -> Message -> Analyzer a
 returnMessage a m = Analyzer ([m], , a)
 
 insertRule:: Rule -> Analyzer ()
 insertRule rule = case ruleKind rule of
-    SimpRule
+    SimpRule -> do
+        insertSimp (ruleIdent rule) (ruleBf rule) (ruleAf rule)
+        updateSimp $ insertRuleToMap rule
+    ImplRule -> updateImpl $ insertRuleToMap rule
+    EqualRule
         | isAssociativeRule rule -> updateFunAttr (ruleLabel rule) enableAssoc
         | isCommutativeRule rule -> updateFunAttr (ruleLabel rule) enableCommu
-        | otherwise -> do
-            insertSimp (ruleIdent rule) (ruleBf rule) (ruleAf rule)
-            updateSimp $ insertRuleToMap rule
+        | otherwise -> analyzeError (ruleIdent rule) "交換律でも結合律でもありません"
         where
+        enableAssoc:: FunAttr -> FunAttr
         enableAssoc attr@ACFun{} = attr
         enableAssoc CFun = ACFun ""
         enableAssoc OFun = AFun
         enableAssoc AFun = AFun
+        enableCommu:: FunAttr -> FunAttr
         enableCommu attr@ACFun{} = attr
-        enableCommu CFun = OFun
+        enableCommu CFun = CFun
         enableCommu OFun = CFun
         enableCommu AFun = ACFun ""
-    ImplRule -> updateImpl $ insertRuleToMap rule
-
-loadRule:: Expr -> Maybe Proof -> Analyzer ()
-loadRule exp prf = do
-    mRule <- buildRule exp
-    case mRule of
-        Just rule -> insertRule rule{ruleProof=prf}
-        Nothing -> return ()
 
 buildCmd:: IdentCmd -> Analyzer Command
 buildCmd (IdentCmd id StepCmd) = return StepCmd
 buildCmd (IdentCmd id ImplCmd) = return ImplCmd
 buildCmd (IdentCmd id UnfoldCmd) = return UnfoldCmd
 buildCmd (IdentCmd id _) = do
-    analyzeErrorM id "Invaild command"
+    analyzeErrorM id "無効な命令です"
     return WrongCmd
 
 buildStrategyRewrite:: IdentStm -> Analyzer (Maybe StrategyRewrite)
@@ -207,12 +207,12 @@ buildStrategyRewrite (IdentStm id (ExistsStm var refs ty)) = do
     return Nothing
 
 buildStrategy:: [IdentStm] -> Analyzer Strategy
-buildStrategy (IdentStm id x:xs) = case x of
-    (CmdStm (IdentCmd _ BeginCmd) exp) -> do
+buildStrategy all@(IdentStm id cmd:xs) = case cmd of
+    (CmdStm (IdentCmd id BeginCmd) exp) -> do
         fom <- buildFom exp
         rew <- buildStrategyRewriteList xs
         let org = maybe StrategyOriginWrong StrategyOriginFom fom
-        return $ Strategy org rew
+        return $ Strategy (StrategyOriginIdent id org) rew
     (CmdStm (IdentCmd _ TargetCmd) exp) -> do
         rew <- buildStrategyRewriteList xs
         org <- case exp of
@@ -220,11 +220,10 @@ buildStrategy (IdentStm id x:xs) = case x of
             exp -> do
                 fom <- buildFom exp
                 return $ maybe StrategyOriginWrong StrategyOriginContext fom
-        return $ Strategy org rew
+        return $ Strategy (StrategyOriginIdent id org) rew
     _ -> do
-        analyzeError id "This is not proof begin"
-        rew <- buildStrategyRewriteList xs
-        return $ Strategy StrategyOriginWrong rew
+        rew <- buildStrategyRewriteList all
+        return $ Strategy (StrategyOriginIdent id StrategyOriginAuto) rew
     where
     buildStrategyRewriteList xs = extractMaybe <$> mapM buildStrategyRewrite xs
 
@@ -240,9 +239,9 @@ buildProofOrigin (StrategyOriginContext con) = do
         case mEnt of
             Just ent -> if entType ent == ty
                 then return $ Just (ent, ty)
-                else analyzeErrorM id "Wrong type"
-            Nothing -> analyzeErrorM id "Not found on context"
-    checkCon fom = analyzeErrorM (showIdent fom) "Not pred"
+                else analyzeErrorM id "型が異なります"
+            Nothing -> analyzeErrorM id "コンテキストにありません"
+    checkCon fom = analyzeErrorM (showIdent fom) "述語ではありません"
 
 buildProofOrigin (StrategyOriginFom fom) = return (ProofOriginFom fom, fom)
 buildProofOrigin StrategyOriginWrong = return (ProofOriginWrong, UnknownFom)
@@ -256,7 +255,7 @@ buildProofCommand trg StepCmd goal = do
         Nothing -> do
             strTrg <- onOpeMap showLatestFom sTrg
             strGoal <- onOpeMap showLatestFom sGoal
-            let msg = "Couldn't match simplified terms with '" ++ strTrg ++ "' and '" ++ strGoal ++ "'"
+            let msg = "簡略形は'" ++ strTrg ++ "'と'" ++ strGoal ++ "'であり、一致しません"
             analyzeError (showIdent goal) msg
             return $ ProofCommand StepCmd goal
 
@@ -265,8 +264,9 @@ buildProofCommand trg ImplCmd goal = do
     case res of
         Just proof -> return $ ProofCommand ImplCmd proof
         Nothing -> do
-            str <- onOpeMap showLatestFom goal
-            analyzeError (showIdent goal) $ "Couldn't derivate from '" ++ str ++ "'"
+            strTrg <- onOpeMap showFom trg
+            strGoal <- onOpeMap showLatestFom goal
+            analyzeError (showIdent goal) $ "'" ++ strTrg ++ "'から'" ++ strGoal ++ "'を導出できません"
             return $ ProofCommand ImplCmd goal
 
 buildProofCommand trg UnfoldCmd goal = do
@@ -274,24 +274,42 @@ buildProofCommand trg UnfoldCmd goal = do
     case res of
         Just proof -> return $ ProofCommand UnfoldCmd proof
 
+makeBinary:: String -> Fom -> Fom -> Fom
+makeBinary str a b = FunFom OFun (Ident NonePosition str) propType [a, b]
+
 buildProofProcess:: Fom -> StrategyRewrite -> Analyzer (ProofProcess, Fom)
 buildProofProcess trg (CmdRewrite cmd goal) = do
     proc <- buildProofCommand trg cmd goal
     return (CmdProcess proc, goal)
 
 buildProofProcess trg (AssumeRewrite cmd assume main) = do
-    let implies a b = FunFom OFun (Ident NonePosition "=>") propType [a, b]
-    mainProof <- buildProof main
-    let firstFom = implies assume (prfBegin mainProof)
+    mainProof <- buildProof main Nothing
+    let firstFom = makeBinary "=>" assume (prfBegin mainProof)
     proofCmd <- buildProofCommand trg cmd firstFom
-    let lastFom = implies assume (prfEnd mainProof)
+    let lastFom = makeBinary "=>" assume (prfEnd mainProof)
     return (AssumeProcess proofCmd assume mainProof, lastFom)
 
 buildProofProcess trg WrongRewrite = return (WrongProcess, UnknownFom)
 
-buildProof:: Strategy -> Analyzer Proof
-buildProof (Strategy stOrg rews) = do
-    (org , begin) <- buildProofOrigin stOrg
+buildProof:: Strategy -> Maybe Rule -> Analyzer Proof
+buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
+    nOrg <- case (mRule, stOrg) of
+        (Just rule, StrategyOriginAuto) -> return $ StrategyOriginFom $ ruleBf rule
+        (Just rule, StrategyOriginLeft) -> return $ StrategyOriginFom $ ruleBf rule
+        (Just rule, StrategyOriginWhole) -> case ruleKind rule of
+            SimpRule -> return $ StrategyOriginFom $ makeBinary "=" (ruleBf rule) (ruleAf rule)
+            ImplRule -> return $ StrategyOriginFom $ makeBinary "=>" (ruleBf rule) (ruleAf rule)
+        (Nothing, StrategyOriginLeft) -> do
+            analyzeError idOrg "ルートスコープ以外では使用できません"
+            return StrategyOriginWrong
+        (Nothing, StrategyOriginWhole) -> do
+            analyzeError idOrg "ルートスコープ以外では使用できません"
+            return StrategyOriginWrong
+        (Nothing, StrategyOriginAuto) -> do
+            analyzeError idOrg "証明の対象が宣言されていません"
+            return StrategyOriginWrong
+        (_, org) -> return org
+    (org , begin) <- buildProofOrigin nOrg
     (list, end) <- buildProofProcessList begin rews
     return $ Proof org list begin end
     where
@@ -302,10 +320,11 @@ buildProof (Strategy stOrg rews) = do
         (rest, end) <- buildProofProcessList goal xs
         return (proc:rest, end)
 
-loadProof:: [IdentStm] -> Analyzer Proof
-loadProof stms = do
+loadProof:: Rule -> [IdentStm] -> Analyzer Proof
+loadProof rule stms = do
     updateVar $ const M.empty
-    buildStrategy stms >>= buildProof
+    stg <- buildStrategy stms
+    buildProof stg $ Just rule
 
 subScope:: Analyzer a -> Analyzer a
 subScope subRountine = do
@@ -323,14 +342,19 @@ loadVarDecs:: [[(Ident, Expr)]] -> Analyzer ()
 loadVarDecs = mapM_ (mapM_ loadVarDec)
 
 loadDecla:: Decla -> Analyzer ()
-loadDecla (Theorem decs prop stms) = subScope $ do
-    loadVarDecs decs
-    prf <- loadProof stms
-    loadRule prop (Just prf)
+loadDecla (Theorem decs prop stms) = do
+    (prf, mRule) <- subScope $ do
+        loadVarDecs decs
+        mRule <- buildRule prop
+        prf <- maybe (return Nothing) (\rule-> Just <$> loadProof rule stms) mRule
+        return (prf, mRule)
+    maybe (return ()) (\rule-> insertRule rule{ruleProof=prf}) mRule
 
-loadDecla (Axiom decs prop) = subScope $ do
-    loadVarDecs decs
-    loadRule prop Nothing
+loadDecla (Axiom decs prop) = do
+    mRule <- subScope $ do
+        loadVarDecs decs
+        buildRule prop
+    maybe (return ()) insertRule mRule
 
 loadDecla (Undef id ty mTex) = do
     mTy <- buildFom ty
@@ -363,7 +387,7 @@ loadDecla (DataType id def) = do
             Nothing -> return ()
         where
         checkType:: Maybe Fom -> Analyzer ()
-        checkType (Just fom) = when (evalType fom /= TypeOfType) (analyzeError id "This is not Type")
+        checkType (Just fom) = when (evalType fom /= TypeOfType) (analyzeError id "型ではありません")
         checkType Nothing = return ()
     insertCstr e = error $ show e
     extractArgs:: String -> Expr -> [Expr]
