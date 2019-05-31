@@ -118,13 +118,8 @@ assign m fom = fom
 insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
 insertSimp id a b = case (funIdent a, funIdent b) of
     (Just fn, Just gn) -> insertSimpByName (idStr fn) (idStr gn)
-    (Nothing, Just gn) -> do 
-        updateList (idStr gn:)
-        analyzeError id "定数は関数よりも常に簡単なため、定数を左辺に使うことはできません"
-    (Just fn, Nothing) -> do 
-        simps <- fmap conList getContext
-        let f = idStr fn
-        if f `elem` simps then return () else updateList (f:)
+    (Nothing, Just gn) -> analyzeError id "定数は関数よりも常に簡単なため、定数を左辺に使うことはできません"
+    (Just fn, Nothing) -> updateList $ \list-> let f = idStr fn in if f `elem` list then list else f:list
     (Nothing, Nothing) -> analyzeError id "全ての定数は等しい簡略性を持つため、定数を両端に持つルールは無効です"
     where
     funIdent:: Fom -> Maybe Ident
@@ -137,11 +132,10 @@ insertSimp id a b = case (funIdent a, funIdent b) of
             (Just fi, Just gi) -> when (fi > gi) $ analyzeError id "すでに宣言されたルールから推論した関数の簡略性によると、左辺の方が右辺よりも簡単です"
             (Just fi, Nothing) -> updateList $ insertAt g fi
             (Nothing, Just gi) -> updateList $ insertAt f (gi+1)
-            (Nothing, Nothing) -> updateList (\m-> g:f:m)
+            (Nothing, Nothing) -> updateList $ \m-> if f == g then f:m else g:f:m
         where
-        insertAt:: a -> Int -> [a] -> [a]
-        insertAt x 0 as = x:as
-        insertAt x i (a:as) = a:insertAt x (i - 1) as
+        insertAt:: a -> Int -> [a] -> [a] 
+        insertAt item idx xs = as ++ (item:bs) where (as, bs) = splitAt idx xs
 
 simplify:: Fom -> Analyzer Fom
 simplify fom = do
