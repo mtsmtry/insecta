@@ -80,17 +80,17 @@ unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
     Just x -> if x == trg then Just m else Nothing
     Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
 
-unifyWithAsg ptn@(FunFom OFun _ _ _) trg@(FunFom OFun _ _ _) = unifyFunNormal unifyArgsOrder ptn trg
-unifyWithAsg ptn@(FunFom AFun _ _ _) trg@(FunFom AFun _ _ _) = unifyFunExtract unifyArgsOrder ptn trg
+unifyWithAsg ptn@FunFom{} trg@(FunFom OFun _ _ _) = unifyFunNormal unifyArgsOrder ptn trg
+unifyWithAsg ptn@FunFom{} trg@(FunFom AFun _ _ _) = unifyFunExtract unifyArgsOrder ptn trg
 
-unifyWithAsg ptn@(FunFom CFun _ _ _) trg@(FunFom CFun _ _ _) = unifyFunNormal unifyArgs ptn trg where
+unifyWithAsg ptn@FunFom{} trg@(FunFom CFun _ _ _) = unifyFunNormal unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' <&&> unifyWithAsg b b') <||> (unifyWithAsg a b' <&&> unifyWithAsg b a')
 
-unifyWithAsg ptn@(FunFom (ACFun restName) _ _ _) trg@(FunFom (ACFun _) _ _ _) = unifyFunExtract unifyArgs ptn trg where
+unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFunExtract unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [] [] = Just
-    unifyArgs [] trgs = Just . M.insert restName trg{funArgs=trgs}
+    unifyArgs [] trgs = Just . M.insert "_" trg{funArgs=trgs}
     unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs
     matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     matchForPtn ptn ptns noMatchTrgs [] = const Nothing
@@ -179,15 +179,16 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
 type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
 
 applyDiff:: Derivater -> (Fom, Fom) -> Analyzer (Maybe Fom)
-applyDiff derivater pair@(fun@(FunFom _ ty f as), FunFom _ ty' g bs) = if f == g && length as == length bs
+applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = if funName bg == funName gl && length as == length bs
     then case num of
         0 -> return Nothing
         1 -> do
             let (xs', x:xs) = splitAt idx args
-            res <- derivater x
-            return $ (\t-> fun{funArgs=map snd xs' ++ t:map snd xs}) <$> res
+            res <- applyDiff derivater x
+            return $ (\t-> bg{funArgs=map snd xs' ++ t:map snd xs}) <$> res
         _ -> derivater pair
     else derivater pair where
+        (as, bs) = (funArgs bg, funArgs gl)
         args = zip as bs
         matchArgs = fmap (uncurry (==)) args
         (idx, num) = encount False matchArgs
@@ -204,26 +205,20 @@ derivate = applyDiff derivateByRuleList where
     derivateByRule:: Rule -> Derivater
     derivateByRule rule = applyDiff $ derivateByRule rule where
         derivateByRule:: Rule -> Derivater
-        derivateByRule rule (begin, goal) = do
-            let mAsg = unify (ruleBf rule) begin
-            case mAsg of
-                Just asg -> return $ if assign asg (ruleAf rule) == goal 
-                    then Just $ Rewrite (NormalReason rule asg) goal begin
-                    else Nothing
-                Nothing -> return Nothing
+        derivateByRule rule (begin, goal) = case unify (ruleBf rule) begin of
+            Just asg -> return $ if assign asg (ruleAf rule) == goal
+                then Just $ Rewrite (NormalReason rule asg) goal begin
+                else Nothing
+            Nothing -> return Nothing
     derivateByRuleList:: Derivater
     derivateByRuleList pair@(FunFom _ h ty as, goal) = do
         rmap <- fmap conImpl getContext
-        let mRules = M.lookup (idStr h) rmap
-        case mRules of
-            Just rules -> derivateByRules rules pair
-                where
-                derivateByRules:: [Rule] -> Derivater
-                derivateByRules [] pair = return Nothing
-                derivateByRules (x:xs) pair = do
-                    a <- derivateByRule x pair
-                    b <- derivateByRules xs pair
-                    return $ a <|> b
+        let or a' b' = do
+                a <- a'
+                b <- b'
+                return $ a <|> b
+        case M.lookup (idStr h) rmap of
+            Just rules -> foldr (or . flip derivateByRule pair) (return Nothing) rules
             Nothing -> return Nothing
     derivateByRuleList _ = return Nothing
 

@@ -46,7 +46,7 @@ reasoning str = do
             let latStr = show $ latestFom res
             return $ fomStr ++ "\n" ++ latStr ++ "\n" ++ showFom omap res
         [Just a, Just b] -> do
-            let fomStr = show a
+            let fomStr = show a ++ "\n" ++ show b
             res <- derivate (a, b)
             return $ fomStr ++ "\n" ++ maybe "Nothing" (showFom omap) res
         _ -> return ""
