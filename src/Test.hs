@@ -37,13 +37,14 @@ reasoningTest prg str = showContext con ++ "\n" ++ showMsgs (msgs ++ msgs') ++ "
 reasoning:: String -> Analyzer String
 reasoning str = do
     omap <- fmap conOpe getContext
-    let exps = if str == [] then [] else parseExprs omap str
+    let exps = if null str then [] else parseExprs omap str
     foms <- mapM (buildFomEx AllowUndefined) exps
     case foms of
         [Just fom] -> do
             let fomStr = show fom
             res <- simplify fom
-            return $ fomStr ++ "\n" ++ showFom omap res
+            let latStr = show $ latestFom res
+            return $ fomStr ++ "\n" ++ latStr ++ "\n" ++ showFom omap res
         [Just a, Just b] -> do
             let fomStr = show a
             res <- derivate (a, b)

@@ -128,7 +128,12 @@ makeEqualRule kind id bf af = do
     let checkType (Just bf) (Just af) = evalType bf == evalType af
         checkType _ _ = False
     bfFom <- buildFom bf
-    afFom <- buildFom af
+    afFom' <- buildFom af
+    let sameFun name (FunFom (ACFun _) (Ident _ name') _ _) = name == name'
+        sameFun _ _ = False
+    let afFom = case (bfFom, afFom') of
+            (Just fun@(FunFom (ACFun _) (Ident _ name) _ _), Just fom) -> if sameFun name fom then afFom' else Just fun{funArgs=[fom]}
+            _ -> afFom'
     if checkType bfFom afFom
         then return $ Rule kind id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
         else analyzeErrorM id "両辺の型が一致しません"
@@ -149,14 +154,14 @@ insertRule rule = case ruleKind rule of
         where
         enableAssoc:: FunAttr -> FunAttr
         enableAssoc attr@ACFun{} = attr
-        enableAssoc CFun = ACFun ""
+        enableAssoc CFun = ACFun "_"
         enableAssoc OFun = AFun
         enableAssoc AFun = AFun
         enableCommu:: FunAttr -> FunAttr
         enableCommu attr@ACFun{} = attr
         enableCommu CFun = CFun
         enableCommu OFun = CFun
-        enableCommu AFun = ACFun ""
+        enableCommu AFun = ACFun "_"
 
 buildCmd:: IdentCmd -> Analyzer Command
 buildCmd (IdentCmd id StepCmd) = return StepCmd
@@ -382,7 +387,7 @@ loadDecla (DataType id def) = do
         mapM_ checkType mArgs
         case conjMaybe mArgs of
             Just args -> do
-                let ty = FunTypeFom { funTypeIdent=id, funArgTypes=args, funRetType=TypeOfType }
+                let ty = FunTypeFom { funTypeIdent=id, funArgTypes=args, funRetType=tyFom }
                 insertEnt True id ty
             Nothing -> return ()
         where

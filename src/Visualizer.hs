@@ -50,10 +50,9 @@ showFunFom:: OpeMap -> (OpeMap -> Fom -> String) -> String -> [Fom]-> String
 showFunFom omap fshow "tuple" as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
 showFunFom omap fshow f args = if isAlpha (head f) 
     then f ++ "(" ++ intercalate ", " (map (fshow omap) args) ++ ")"
-    else case args of
-        [unary] -> f ++ fshow omap unary
-        _ -> intercalate f (map (fshow omap) args)
+    else if getArgNum f == 1 then f ++ fshow omap (head args) else intercalate f (map (fshow omap) args)
     where
+    getArgNum h = maybe 2 (\(x, _, _)-> x) $ M.lookup h omap
     getPre h = maybe 100 (\(_, x, _)-> x) $ M.lookup h omap
     bshow fun@FunFom{} = let g = idStr $ funName fun in if length (show g) == 2 && getPre f > getPre (show g) 
         then "(" ++ fshow omap fun ++ ")" 

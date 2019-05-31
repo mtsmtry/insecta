@@ -15,7 +15,7 @@ import Data
 (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <||> b = \m-> a m <|> b m
 (<&&>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
-a <&&> b = \m-> a m >>= \m'-> b m'
+a <&&> b = a >=> b
 
 extractArgs:: String -> Fom -> [Fom]
 extractArgs str fun@FunFom{} = if str == idStr (funName fun)
@@ -64,34 +64,40 @@ unifyArgsOrder ptns args = if length ptns /= length args
     where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs (e:ex) (e':ex') = unifyWithAsg e e' <&&> unifyArgs ex ex'
-    unifyArgs [] [] = id . Just
+    unifyArgs [] [] = Just
     unifyArgs _ _ = const Nothing
 
 unifyWithAsg:: Fom -> Fom -> AssignMap -> Maybe AssignMap
 unifyWithAsg Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
 unifyWithAsg ptn trg@Rewrite{} = unifyWithAsg ptn $ rewLater trg
-unifyWithAsg TypeOfType TypeOfType = id . Just
+unifyWithAsg TypeOfType TypeOfType = Just
 unifyWithAsg ptn@(CstFom id ty) trg@(CstFom id' ty') = if id == id' then unifyWithAsg ty ty' else const Nothing
-unifyWithAsg ptn@NumFom{} trg = if ptn == trg then id . Just else const Nothing
-unifyWithAsg ptn@StrFom{} trg = if ptn == trg then id . Just else const Nothing
+unifyWithAsg ptn@NumFom{} trg = if ptn == trg then Just else const Nothing
+unifyWithAsg ptn@StrFom{} trg = if ptn == trg then Just else const Nothing
 unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl ptnVl <&&> unifyWithAsg trgTy ptnTy
+
 unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
     Just x -> if x == trg then Just m else Nothing
     Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
+
 unifyWithAsg ptn@(FunFom OFun _ _ _) trg@(FunFom OFun _ _ _) = unifyFunNormal unifyArgsOrder ptn trg
 unifyWithAsg ptn@(FunFom AFun _ _ _) trg@(FunFom AFun _ _ _) = unifyFunExtract unifyArgsOrder ptn trg
+
 unifyWithAsg ptn@(FunFom CFun _ _ _) trg@(FunFom CFun _ _ _) = unifyFunNormal unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' <&&> unifyWithAsg b b') <||> (unifyWithAsg a b' <&&> unifyWithAsg b a')
-unifyWithAsg ptn@(FunFom (ACFun rest) _ _ _) trg@(FunFom (ACFun rest') f ty _) = unifyFunExtract unifyArgs ptn trg where
+
+unifyWithAsg ptn@(FunFom (ACFun restName) _ _ _) trg@(FunFom (ACFun _) _ _ _) = unifyFunExtract unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs [] trgs = Just . M.insert rest (FunFom (ACFun "") f ty trgs)
-    unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs where
+    unifyArgs [] [] = Just
+    unifyArgs [] trgs = Just . M.insert restName trg{funArgs=trgs}
+    unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs
     matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     matchForPtn ptn ptns noMatchTrgs [] = const Nothing
     matchForPtn ptn ptns noMatchTrgs (trg:restTrgs) = main <||> rest where
         main = unifyWithAsg ptn trg <&&> unifyArgs ptns (noMatchTrgs ++ restTrgs)
         rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
+
 unifyWithAsg _ _ = const Nothing
 
 unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
@@ -101,6 +107,9 @@ unifyList f (x:xs) trg = case unify (f x) trg of
 
 assign:: AssignMap -> Fom -> Fom
 assign m fom@(VarFom id ty) = fromMaybe fom $ M.lookup (idStr id) m
+assign m fom@(FunFom (ACFun name) _ _ _) = case M.lookup name m of
+    Just rest -> fom{funArgs=[applyArgs (assign m) fom, rest]}
+    Nothing -> applyArgs (assign m) fom
 assign m fom = applyArgs (assign m) fom
 
 insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
