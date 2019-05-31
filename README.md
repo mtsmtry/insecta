@@ -11,17 +11,17 @@
 - LightMath
 ```
 theorem (a, b: R) (f: Converge(a), g: Converge(b)) {
-	n->f[n] * g[n]: Converge(a * b)
+    n->f[n] * g[n]: Converge(a * b)
 proof:
-	let M = max(f, g)
+    let M = max(f, g)
     forall eps: R
-	context f.Converge(a) & g.Converge(b)
-	unfold n >= n_1 -> dist(a, f(n)) < eps/(2*M) & n >= n_2 -> dist(b, g(n)) < eps/(2*abs(a)+1)
-	impl assume n >= n_1 & n >= n_2 {
+    context f.Converge(a) & g.Converge(b)
+    unfold n >= n_1 -> dist(a, f(n)) < eps/(2*M) & n >= n_2 -> dist(b, g(n)) < eps/(2*abs(a)+1)
+    impl assume n >= n_1 & n >= n_2 {
         start dist(a, f(n)) < eps/(2*M) & dist(b, g(n)) < eps/(2*abs(a)+1)
-		impl dist(a*b, f(n)*g(n)) <= abs(a*(b-g(n))) + abs(g(n)*(a-f(n)))
-		step dist(a*b, f(n)*g(n)) <= abs(a)*dist(b, g(n)) + abs(g(n))*dist(a, f(n))
-		step dist(a*b, f(n)*g(n)) <= eps
+        impl dist(a*b, f(n)*g(n)) <= abs(a*(b-g(n))) + abs(g(n)*(a-f(n)))
+        step dist(a*b, f(n)*g(n)) <= abs(a)*dist(b, g(n)) + abs(g(n))*dist(a, f(n))
+        step dist(a*b, f(n)*g(n)) <= eps
 	}
 }
 ```

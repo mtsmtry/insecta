@@ -148,7 +148,7 @@ simplify fom = do
     return $ stepLoop list simp fom
 
 stepLoop:: Simplicity -> RuleMap -> Fom -> Fom
-stepLoop simps m e = maybe e (stepLoop simps m) $ step e where
+stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
     -- 式 -> [(関数名, 関数の簡略性)]
     lookupHeads:: Fom -> [(String, Int)]
     lookupHeads rew@Rewrite{} = lookupHeads $ rewLater rew
@@ -166,10 +166,9 @@ stepLoop simps m e = maybe e (stepLoop simps m) $ step e where
     -- [ルール] -> 簡略性 -> 式 -> 結果
     applyAtSimp:: [Rule] -> Int -> Fom -> Maybe Fom
     applyAtSimp rules simp (Rewrite r a b) = applyAtSimp rules simp a
-    applyAtSimp rules simp fun@FunFom{} = do
-        fsimp <- elemIndex (idStr $ funName fun) simps
-        let rest = applyArgsOnce (applyAtSimp rules simp) fun
-        if simp == fsimp then apply rules e <|> rest else rest
+    applyAtSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
+        fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
+        rest = applyArgsOnce (applyAtSimp rules simp) fun
     applyAtSimp _ _ _ = Nothing
     -- [(関数名, 簡略性)] -> 式 -> 結果
     applyByHeadList:: [(String, Int)] -> Fom -> Maybe Fom

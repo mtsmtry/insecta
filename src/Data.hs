@@ -180,8 +180,8 @@ applyArgs apply fom = apply fom
 
 applyArgsOnce:: (Fom -> Maybe Fom) -> Fom -> Maybe Fom
 applyArgsOnce apply fun@FunFom{} = do
-    nargs <- applyOnce (funArgs fun) []
-    return fun{funArgs=nargs}
+    args <- applyOnce (funArgs fun) []
+    return fun{funArgs=args}
     where
     applyOnce:: [Fom] -> [Fom] -> Maybe [Fom]
     applyOnce [] _ = Nothing
