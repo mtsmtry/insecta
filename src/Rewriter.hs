@@ -110,7 +110,8 @@ assign m fom@(VarFom id ty) = fromMaybe fom $ M.lookup (idStr id) m
 assign m fom@(FunFom (ACFun name) _ _ _) = case M.lookup name m of
     Just rest -> fom{funArgs=[applyArgs (assign m) fom, rest]}
     Nothing -> applyArgs (assign m) fom
-assign m fom = applyArgs (assign m) fom
+assign m fom@FunFom{} = applyArgs (assign m) fom
+assign m fom = fom
 
 insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
 insertSimp id a b = case (funIdent a, funIdent b) of
