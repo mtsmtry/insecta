@@ -124,10 +124,10 @@ showExprIdent (StrExpr id) = id
 showExprIdent (NumExpr (IdentInt pos num)) = Ident pos (show num)
 
 -- Formula
-data FunAttr = OFun | CFun | ACFun String deriving (Eq, Show)
+data FunAttr = OFun | CFun | AFun | ACFun String deriving (Eq, Show)
 
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
-    | PredFom { predTrg::Ident, predType::Fom }
+    | PredFom { predVl::Fom, predTy::Fom }
     | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] } 
     | CstFom { cstName::Ident, cstType::Fom }
     | VarFom { varName::Ident, varType::Fom }
@@ -216,7 +216,7 @@ data Decla = Axiom [VarDec] Expr
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 
-data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString }
+data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString, entFunAttr::FunAttr }
     | PredEntity { predSelf::String, predExtend::Fom, predDef::Fom, predName::String }  deriving (Show)
     
 data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
@@ -254,9 +254,9 @@ data Context = Context {
     conImpl::RuleMap,
     conEnt::EntityMap,
     conPred::PredRuleMap }
-    
+
 newContext:: OpeMap -> Context
-newContext omap = Context { 
+newContext omap = Context {
         conVar=M.empty,
         conOpe=omap,
         conList=[],
@@ -265,7 +265,7 @@ newContext omap = Context {
         conEnt=buildInScope,
         conPred=M.empty }
     where
-    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=Nothing }
+    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=Nothing, entFunAttr=OFun }
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
 
@@ -295,13 +295,16 @@ analyzeErrorB ps str = Analyzer ([Message ps str], , False)
 analyzeError:: Ident -> String -> Analyzer ()
 analyzeError ps str = Analyzer ([Message ps str], , ())
 
+updateFunAttr:: String -> (FunAttr -> FunAttr) -> Analyzer ()
+updateFunAttr name f = updateEnt $ M.adjust (\ent-> ent{entFunAttr=f $ entFunAttr ent}) name
+    
 insertEnt:: Bool -> Ident -> Fom -> Analyzer ()
 insertEnt const id ty = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing })
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing, entFunAttr=OFun })
 
 insertEntWithLatex:: Bool -> Ident -> Fom -> Maybe EmbString -> Analyzer ()
 insertEntWithLatex const id ty latex = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=latex })
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=latex, entFunAttr=OFun })
 
 lookupEnt:: String -> Analyzer (Maybe Entity)
 lookupEnt str = do

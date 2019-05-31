@@ -61,7 +61,7 @@ showFunFom omap fshow f args = if isAlpha (head f)
     bshow fom = fshow omap fom
 
 showFom:: OpeMap -> Fom -> String
-showFom omap (PredFom id ty) = idStr id ++ "." ++ showFom omap ty
+showFom omap (PredFom vl ty) = showFom omap vl ++ "." ++ showFom omap ty
 showFom omap UnknownFom = "unknown"
 showFom omap TypeOfType = "Type"
 showFom omap (StrFom id) = "\"" ++ idStr id ++ "\"" 

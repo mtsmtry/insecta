@@ -1,4 +1,4 @@
-module Rewriter(unify, assign, simplify, derivate, derivateUnfold, derivateExists, insertSimp, mergeRewrite) where
+module Rewriter where
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -17,6 +17,12 @@ a <||> b = \m-> a m <|> b m
 (<&&>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <&&> b = \m-> a m >>= \m'-> b m'
 
+extractArgs:: String -> Fom -> [Fom]
+extractArgs str fun@FunFom{} = if str == idStr (funName fun)
+    then concatMap (extractArgs str) (funArgs fun)
+    else [fun]
+extractArgs str expr = [expr]
+
 convert:: Fom -> Fom -> Analyzer Bool
 convert from to = if from == to 
     then return True
@@ -33,53 +39,66 @@ convert from to = if from == to
             Just (asg, rule) -> return True
             Nothing -> return False
 
-unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
-unifyList f (x:xs) trg = case unify (f x) trg of
-    Just asg -> Just (asg, x)
-    Nothing -> unifyList f xs trg
-
 unify:: Fom -> Fom -> Maybe AssignMap
-unify ptn trg = unifym ptn trg M.empty
+unify ptn trg = unifyWithAsg ptn trg M.empty
 
 unifyFun:: ([Fom] -> [Fom] -> AssignMap -> Maybe AssignMap) -> Fom -> Fom -> AssignMap -> Maybe AssignMap
 unifyFun unifyArgs ptn trg = if funName ptn /= funName trg then const Nothing else \m-> do
-    tyAsg <- unifym (funType ptn) (funType trg) m
+    tyAsg <- unifyWithAsg (funType ptn) (funType trg) m
     vlAsg <- unifyArgs (funArgs ptn) (funArgs trg) tyAsg
     return $ M.union tyAsg vlAsg
 
-unifym:: Fom -> Fom -> AssignMap -> Maybe AssignMap
-unifym Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
-unifym ptn trg@Rewrite{} = unifym ptn $ rewLater trg
-unifym TypeOfType TypeOfType = id . Just
-unifym ptn@(CstFom id ty) trg@(CstFom id' ty') = if id == id' then unifym ty ty' else const Nothing
-unifym ptn@NumFom{} trg = if ptn == trg then id . Just else const Nothing
-unifym ptn@StrFom{} trg = if ptn == trg then id . Just else const Nothing
-
-unifym ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
-    Just x -> if x == trg then Just m else Nothing
-    Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
-
-unifym ptn@(FunFom OFun _ _ _) trg@(FunFom OFun _ _ _) = unifyFun unifyArgs ptn trg where
+unifyArgsOrder:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
+unifyArgsOrder ptns args = if length ptns /= length args 
+    then return Nothing
+    else unifyArgs ptns args
+    where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs (e:ex) (e':ex') = unifym e e' <&&> unifyArgs ex ex'
+    unifyArgs (e:ex) (e':ex') = unifyWithAsg e e' <&&> unifyArgs ex ex'
     unifyArgs [] [] = id . Just
     unifyArgs _ _ = const Nothing
 
-unifym ptn@(FunFom CFun _ _ _) trg@(FunFom CFun _ _ _) = unifyFun unifyArgs ptn trg where
-    unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs [a, b] [a', b'] = (unifym a a' <&&> unifym b b') <||> (unifym a b' <&&> unifym b a')
+unifyWithAsg:: Fom -> Fom -> AssignMap -> Maybe AssignMap
+unifyWithAsg Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
+unifyWithAsg ptn trg@Rewrite{} = unifyWithAsg ptn $ rewLater trg
+unifyWithAsg TypeOfType TypeOfType = id . Just
+unifyWithAsg ptn@(CstFom id ty) trg@(CstFom id' ty') = if id == id' then unifyWithAsg ty ty' else const Nothing
+unifyWithAsg ptn@NumFom{} trg = if ptn == trg then id . Just else const Nothing
+unifyWithAsg ptn@StrFom{} trg = if ptn == trg then id . Just else const Nothing
 
-unifym ptn@(FunFom (ACFun rest) _ _ _) trg@(FunFom (ACFun rest') f ty _) = unifyFun unifyArgs ptn trg where
+unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl ptnVl <&&> unifyWithAsg trgTy ptnTy
+
+unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
+    Just x -> if x == trg then Just m else Nothing
+    Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
+
+unifyWithAsg ptn@(FunFom AFun _ _ _) trg@(FunFom AFun _ _ _) = unifyArgsOrder ptns trgs where
+    name = idStr $ funName ptn
+    ptns = extractArgs name ptn
+    trgs = extractArgs name trg
+
+unifyWithAsg ptn@(FunFom OFun _ _ _) trg@(FunFom OFun _ _ _) = unifyFun unifyArgsOrder ptn trg where
+
+unifyWithAsg ptn@(FunFom CFun _ _ _) trg@(FunFom CFun _ _ _) = unifyFun unifyArgs ptn trg where
+    unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
+    unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' <&&> unifyWithAsg b b') <||> (unifyWithAsg a b' <&&> unifyWithAsg b a')
+
+unifyWithAsg ptn@(FunFom (ACFun rest) _ _ _) trg@(FunFom (ACFun rest') f ty _) = unifyFun unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [] trgs = Just . M.insert rest (FunFom (ACFun "") f ty trgs)
     unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs where
     matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     matchForPtn ptn ptns noMatchTrgs [] = const Nothing
     matchForPtn ptn ptns noMatchTrgs (trg:restTrgs) = main <||> rest where
-        main = unifym ptn trg <&&> unifyArgs ptns (noMatchTrgs ++ restTrgs)
+        main = unifyWithAsg ptn trg <&&> unifyArgs ptns (noMatchTrgs ++ restTrgs)
         rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
 
-unifym _ _ = const Nothing
+unifyWithAsg _ _ = const Nothing
+
+unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
+unifyList f (x:xs) trg = case unify (f x) trg of
+    Just asg -> Just (asg, x)
+    Nothing -> unifyList f xs trg
 
 assign:: AssignMap -> Fom -> Fom
 assign m fom@(VarFom id ty) = fromMaybe fom $ M.lookup (idStr id) m

@@ -15,28 +15,36 @@ import Rewriter
 import Data
 import Visualizer
 
-isAssociative:: Fom -> Fom -> Bool
-isAssociative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
-    ([a, b], [c, d]) -> funName bf == funName af && a == c && b == d
-    _ -> False
-isAssociative _ _ = False
+onRule:: (Fom -> Fom -> Bool) -> Rule -> Bool
+onRule f rule = f (ruleBf rule) (ruleAf rule)
 
-isCommutative:: Fom -> Fom -> Bool
-isCommutative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
-    ([f@FunFom{}, c], [x, g@FunFom{}]) -> case (funArgs f, funArgs g) of
-        ([a, b], [y, z]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
+isAssociativeRule:: Rule -> Bool
+isAssociativeRule = onRule isAssociative where
+    isAssociative:: Fom -> Fom -> Bool
+    isAssociative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
+        ([a, b], [c, d]) -> funName bf == funName af && a == c && b == d
         _ -> False
-    ([a, f@FunFom{}], [g@FunFom{}, z]) -> case (funArgs f, funArgs g) of
-        ([b, c], [x, y]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
+    isAssociative _ _ = False
+
+isCommutativeRule:: Rule -> Bool
+isCommutativeRule = onRule isCommutative where
+    isCommutative:: Fom -> Fom -> Bool
+    isCommutative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
+        ([f@FunFom{}, c], [x, g@FunFom{}]) -> case (funArgs f, funArgs g) of
+            ([a, b], [y, z]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
+            _ -> False
+        ([a, f@FunFom{}], [g@FunFom{}, z]) -> case (funArgs f, funArgs g) of
+            ([b, c], [x, y]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
+            _ -> False
         _ -> False
-    _ -> False
-    where
-    sameName:: [Fom] -> Bool
-    sameName (x:xs) = let name = funName x in all (\x-> name == funName x) xs
-isCommutative _ _ = False
+        where
+        sameName:: [Fom] -> Bool
+        sameName (x:xs) = let name = funName x in all (\x-> name == funName x) xs
+    isCommutative _ _ = False
 
 data BuildFomOption = AllowUndefined | NotAllowUndefined deriving(Eq, Show)
 
+buildFom:: Expr -> Analyzer (Maybe Fom)
 buildFom = buildFomEx NotAllowUndefined
 
 buildFomEx:: BuildFomOption -> Expr -> Analyzer (Maybe Fom)
@@ -126,9 +134,21 @@ returnMessage a m = Analyzer ([m], , a)
 
 insertRule:: Rule -> Analyzer ()
 insertRule rule = case ruleKind rule of
-    SimpRule -> do
-        insertSimp (ruleIdent rule) (ruleBf rule) (ruleAf rule)
-        updateSimp $ insertRuleToMap rule
+    SimpRule
+        | isAssociativeRule rule -> updateFunAttr (ruleLabel rule) enableAssoc
+        | isCommutativeRule rule -> updateFunAttr (ruleLabel rule) enableCommu
+        | otherwise -> do
+            insertSimp (ruleIdent rule) (ruleBf rule) (ruleAf rule)
+            updateSimp $ insertRuleToMap rule
+        where
+        enableAssoc attr@ACFun{} = attr
+        enableAssoc CFun = ACFun ""
+        enableAssoc OFun = AFun
+        enableAssoc AFun = AFun
+        enableCommu attr@ACFun{} = attr
+        enableCommu CFun = OFun
+        enableCommu OFun = CFun
+        enableCommu AFun = ACFun ""
     ImplRule -> updateImpl $ insertRuleToMap rule
 
 loadRule:: Expr -> Maybe Proof -> Analyzer ()
@@ -215,19 +235,14 @@ buildProofOrigin (StrategyOriginContext con) = do
     return (maybe ProofOriginWrong ProofOriginContext preds, con)
     where
     checkCon:: Fom -> Analyzer (Maybe (Entity, Fom))
-    checkCon (PredFom pred ty) = do
-        mEnt <- lookupEnt $ idStr pred
+    checkCon (PredFom (VarFom id _) ty) = do
+        mEnt <- lookupEnt $ idStr id
         case mEnt of
             Just ent -> if entType ent == ty
                 then return $ Just (ent, ty)
-                else analyzeErrorM pred "Wrong type"
-            Nothing -> analyzeErrorM pred "Not found on context"
+                else analyzeErrorM id "Wrong type"
+            Nothing -> analyzeErrorM id "Not found on context"
     checkCon fom = analyzeErrorM (showIdent fom) "Not pred"
-    extractArgs:: String -> Fom -> [Fom]
-    extractArgs str fun@FunFom{} = if str == idStr (funName fun)
-        then concatMap (extractArgs str) (funArgs fun)
-        else [fun]
-    extractArgs str expr = [expr]
 
 buildProofOrigin (StrategyOriginFom fom) = return (ProofOriginFom fom, fom)
 buildProofOrigin StrategyOriginWrong = return (ProofOriginWrong, UnknownFom)
@@ -353,7 +368,7 @@ loadDecla (DataType id def) = do
     insertCstr e = error $ show e
     extractArgs:: String -> Expr -> [Expr]
     extractArgs str fun@(FunExpr id args) = if str == idStr id then concatMap (extractArgs str) args else [fun]
-    extractArgs str expr = [expr]
+    extractArgs str expr = [expr]    
 
 loadDecla _ = return ()
 
