@@ -241,7 +241,7 @@ parseDeclaBody omap "theorem" = return (Just Theorem)
     <++> parseExpr omap
     <::> parseToken (IdentToken "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap
     <::> parseSymbol "}"
-parseDeclaBody omap "define" = return (Just Define)
+parseDeclaBody omap "def" = return (Just Define)
     <++> parseIdent
     <++> parseParenVarDecsSet omap
     <::> parseSymbol ":" <++> parseExpr omap

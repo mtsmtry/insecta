@@ -365,10 +365,12 @@ loadDecla (Undef id ty mTex) = do
     mTy <- buildFom ty
     maybe (return ()) (\ty-> insertEntWithLatex True id ty mTex) mTy
     
-loadDecla (Define id decs ret def) = subScope $ do
-    loadVarDecs decs
-    mArgTys <- mapM (buildFom . snd) (last decs)
-    mRetTy <- buildFom ret
+loadDecla (Define id decs ret def) = do
+    (mArgTys, mRetTy) <- subScope $ do
+        loadVarDecs decs
+        mArgTys <- mapM (buildFom . snd) (last decs)
+        mRetTy <- buildFom ret
+        return (mArgTys, mRetTy)
     case (conjMaybe mArgTys, mRetTy) of
         (Just argTys, Just retTy) -> do
             let ty = FunTypeFom { funTypeIdent = id, funArgTypes = argTys, funRetType = retTy }

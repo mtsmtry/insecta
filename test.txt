@@ -23,7 +23,7 @@ undef R: Type
 
 undef operator +	: (N, N)->N 			latex "+" 
 undef operator *	: (N, N)->N 			latex "\cdot"
-undef operator =>	: (Prop, Prop)->Prop 	latex "\rightarrow"
+# undef operator =>	: (Prop, Prop)->Prop 	latex "\rightarrow"
 undef operator &	: (Prop, Prop)->Prop 	latex "\land"
 undef operator |	: (Prop, Prop)->Prop 	latex "\lir"
 undef operator ~	: Prop->Prop 			latex "\lnot"
@@ -55,15 +55,10 @@ axiom (A: Prop) { A & True >>= A }
 axiom (A: Prop) { A | True >>= True }
 axiom (A: Prop) { A & A >>= A }
 
-axiom (A: Prop, B: Prop, C: Prop) { A & (B | C) >>= A & B | A & C }
-axiom (A: Prop, B: Prop, C: Prop) { (A | B) & C >>= A & C | B & C }
+def operator => (A, B: Prop): Prop { A | ~B }
 
 axiom (A: Prop) {
 	A | A >>= A
-}
-
-axiom (A: Prop, B: Prop) {
-	A => B >>= ~A | B 
 }
 
 axiom (A: Prop, B: Prop) {
@@ -72,4 +67,20 @@ axiom (A: Prop, B: Prop) {
 
 axiom (A: Prop, B: Prop) {
 	~(A | B) >>= ~A | ~B
+}
+
+dew
+theorem (A, B, P, Q: Prop) {
+	((A => P) & (B => Q)) => ((A & B) => (P & Q))
+proof:
+	step (A => P) & (B => Q)
+	step (~A | P) & (~B | Q)
+	step ~A & ~B | ~A & Q | P & ~B | P & Q
+	impl ~A & ~B | ~A | P & ~B | P & Q
+	impl ~A & ~B | ~A | ~B | P & Q
+	step ~(A | B) | ~(A & B) | (P & Q)
+	step ((A | B) & (A & B)) => P & Q
+	step (A & B & A | B & A & B) => P & Q
+	step (A & B | A & B) => P & Q
+	step (A & B) => (P & Q)
 }
