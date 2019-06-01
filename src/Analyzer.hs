@@ -163,16 +163,16 @@ insertRule rule = case ruleKind rule of
         enableCommu OFun = CFun
         enableCommu AFun = ACFun "_"
 
-buildCmd:: IdentCmd -> Analyzer Command
-buildCmd (IdentCmd id StepCmd) = return StepCmd
-buildCmd (IdentCmd id ImplCmd) = return ImplCmd
-buildCmd (IdentCmd id UnfoldCmd) = return UnfoldCmd
-buildCmd (IdentCmd id _) = do
+buildCmd:: (IdentWith Command) -> Analyzer Command
+buildCmd (id, StepCmd) = return StepCmd
+buildCmd (id, ImplCmd) = return ImplCmd
+buildCmd (id, UnfoldCmd) = return UnfoldCmd
+buildCmd (id, _) = do
     analyzeErrorM id "無効な命令です"
     return WrongCmd
 
-buildStrategyRewrite:: IdentStm -> Analyzer (Maybe StrategyRewrite)
-buildStrategyRewrite (IdentStm id (CmdStm idCmd exp)) = do
+buildStrategyRewrite:: (IdentWith Statement) -> Analyzer (Maybe StrategyRewrite)
+buildStrategyRewrite (id, (CmdStm idCmd exp)) = do
     cmd <- buildCmd idCmd
     fom <- if cmd == UnfoldCmd
         then buildFomEx AllowUndefined exp
@@ -180,45 +180,45 @@ buildStrategyRewrite (IdentStm id (CmdStm idCmd exp)) = do
     let mRew = CmdRewrite cmd <$> fom
     return $ Just $ fromMaybe WrongRewrite mRew
 
-buildStrategyRewrite (IdentStm id (AssumeStm idCmd assume stm)) = do
+buildStrategyRewrite (id, (AssumeStm idCmd assume stm)) = do
     cmd <- buildCmd idCmd
     fom <- buildFom assume
     block <- buildStrategy stm
     let proof = AssumeRewrite cmd <$> fom <*> Just block
     return $ Just $ fromMaybe WrongRewrite proof
 
-buildStrategyRewrite (IdentStm id (ForkStm list)) = do
+buildStrategyRewrite (id, (ForkStm list)) = do
     forks <- mapM buildFork list
     return $ Just $ ForkRewrite forks
     where
-    buildFork:: (IdentCmd, [IdentStm]) -> Analyzer (Command, Strategy)
+    buildFork:: (IdentWith Command, [IdentWith Statement]) -> Analyzer (Command, Strategy)
     buildFork (idCmd, stms) = do
         cmd <- buildCmd idCmd
         block <- buildStrategy stms
         return (cmd, block)
 
-buildStrategyRewrite (IdentStm id (ForAllStm var ty)) = do
+buildStrategyRewrite (id, (ForAllStm var ty)) = do
     mFom <- buildFom ty
     case mFom of
         Just fom -> updateVar $ M.insert (idStr var) $ Variable ForAll fom
         Nothing -> return ()
     return Nothing
 
-buildStrategyRewrite (IdentStm id (ExistsStm var refs ty)) = do
+buildStrategyRewrite (id, (ExistsStm var refs ty)) = do
     mFom <- buildFom ty
     case mFom of
         Just fom -> updateVar $ M.insert (idStr var) $ Variable (Exists refs) fom
         Nothing -> return ()
     return Nothing
 
-buildStrategy:: [IdentStm] -> Analyzer Strategy
-buildStrategy all@(IdentStm id cmd:xs) = case cmd of
-    (CmdStm (IdentCmd id BeginCmd) exp) -> do
+buildStrategy:: [IdentWith Statement] -> Analyzer Strategy
+buildStrategy all@((id, cmd):xs) = case cmd of
+    (CmdStm (id, BeginCmd) exp) -> do
         fom <- buildFom exp
         rew <- buildStrategyRewriteList xs
         let org = maybe StrategyOriginWrong StrategyOriginFom fom
         return $ Strategy (StrategyOriginIdent id org) rew
-    (CmdStm (IdentCmd _ TargetCmd) exp) -> do
+    (CmdStm (_, TargetCmd) exp) -> do
         rew <- buildStrategyRewriteList xs
         org <- case exp of
             (IdentExpr (Ident _ "left")) -> return StrategyOriginLeft
@@ -279,6 +279,8 @@ buildProofCommand trg UnfoldCmd goal = do
     case res of
         Just proof -> return $ ProofCommand UnfoldCmd proof
 
+buildProofCommand trg WrongCmd goal = return $ ProofCommand WrongCmd goal
+
 makeBinary:: String -> Fom -> Fom -> Fom
 makeBinary str a b = FunFom OFun (Ident NonePosition str) propType [a, b]
 
@@ -314,7 +316,7 @@ buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
             analyzeError idOrg "証明の対象が宣言されていません"
             return StrategyOriginWrong
         (_, org) -> return org
-    (org , begin) <- buildProofOrigin nOrg
+    (org, begin) <- buildProofOrigin nOrg
     (list, end) <- buildProofProcessList begin rews
     return $ Proof org list begin end
     where
@@ -325,7 +327,7 @@ buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
         (rest, end) <- buildProofProcessList goal xs
         return (proc:rest, end)
 
-loadProof:: Rule -> [IdentStm] -> Analyzer Proof
+loadProof:: Rule -> [IdentWith Statement] -> Analyzer Proof
 loadProof rule stms = do
     updateVar $ const M.empty
     stg <- buildStrategy stms

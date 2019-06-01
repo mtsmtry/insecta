@@ -183,6 +183,14 @@ former <!!> latter = former >>= \case
             Nothing -> return $ Just (f Nothing)
     Nothing -> return Nothing
 
+parseSwitch:: (String -> Maybe (Parser (Maybe a))) -> Parser (Maybe a) -> Parser (Maybe a)
+parseSwitch switch other = Parser $ \case
+    [] -> ([], [], Nothing)
+    all@(PosToken _ (IdentToken str):ts) -> case switch str of
+        Just parser -> (runParser parser) ts
+        Nothing -> (runParser other) all
+    all -> (runParser other) all
+
 parseSequence:: Parser (Maybe a) -> Parser [a]
 parseSequence p = p >>= \case
     Just x' -> (x':) <$> parseSequence p
@@ -194,28 +202,33 @@ parseCommaSeparated = parseSeparated $ parseToken Comma
 parseVarDecSet:: OpeMap -> Parser (Maybe VarDecSet)
 parseVarDecSet omap = return (Just VarDecSet) <&&> parseCommaSeparated parseIdent <::> parseSymbol ":" <++> parseExpr omap
 
-parseMultiLineStm:: OpeMap -> Parser (Maybe [IdentStm])
+parseMultiLineStm:: OpeMap -> Parser (Maybe [IdentWith Statement])
 parseMultiLineStm omap = Just <$> parseSequence (parseStatement omap)
 
-parseStatement:: OpeMap -> Parser (Maybe IdentStm)
+parseStatement:: OpeMap -> Parser (Maybe (IdentWith Statement))
 parseStatement omap = parseCmd >>= \case
-    Just idCmd@(IdentCmd id _) -> parseIdent >>= ((fmap $ IdentStm id) <$> ) . \case
-        Just (Ident _ "assume") -> return (Just $ AssumeStm idCmd)
-            <++> parseExpr omap <::> parseSymbol "{"
-            <++> parseBlock <::> parseSymbol "}"
-        _ -> return (Just $ CmdStm idCmd) <++> parseExpr omap
-    Nothing -> return Nothing
-    where
-    parseCmd:: Parser (Maybe IdentCmd)
-    parseCmd = parseIdent >>= \case
-        Just id@(Ident _ "step") -> return $ Just $ IdentCmd id StepCmd
-        Just id@(Ident _ "impl") -> return $ Just $ IdentCmd id ImplCmd
-        Just id@(Ident _ "begin") -> return $ Just $ IdentCmd id BeginCmd
-        Just id@(Ident _ "target") -> return $ Just $ IdentCmd id TargetCmd
-        Just id@Ident{} -> return $ Just $ IdentCmd id WrongCmd
         Nothing -> return Nothing
-    parseBlock:: Parser (Maybe [IdentStm])
+        Just idCmd -> withIdent (fst idCmd) $ parseSwitch (switch idCmd) (other idCmd)
+    where
+    switch idCmd = \case
+        "assume" -> Just $ return (Just $ AssumeStm idCmd) <++> parseExpr omap <++> parseBlock
+        _ -> Nothing
+    other idCmd = return (Just $ CmdStm idCmd) <++> parseExpr omap
+    parseCmd:: Parser (Maybe (IdentWith Command))
+    parseCmd = parseIdent >>= \case
+        Just id@(Ident _ "step") -> return $ Just $ (id, StepCmd)
+        Just id@(Ident _ "impl") -> return $ Just $ (id, ImplCmd)
+        Just id@(Ident _ "unfold") -> return $ Just $ (id, UnfoldCmd)
+        Just id@(Ident _ "begin") -> return $ Just $ (id, BeginCmd)
+        Just id@(Ident _ "target") -> return $ Just $ (id, TargetCmd)
+        Just id@Ident{} -> return $ Just (id, WrongCmd)
+        Nothing -> return Nothing
+    parseBlock:: Parser (Maybe [IdentWith Statement])
     parseBlock = return (Just id) <::> parseSymbol "{" <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
+    withIdent:: Ident -> Parser (Maybe a) -> Parser (Maybe (IdentWith a))
+    withIdent id parse = parse >>= \case
+        Just item -> return $ Just $ (id, item)
+        Nothing -> return Nothing
 
 parseVarDecs:: OpeMap -> Parser (Maybe VarDec)
 parseVarDecs omap = fmap (Just . conv) parse

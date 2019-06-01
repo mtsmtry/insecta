@@ -206,7 +206,7 @@ insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
 
 -- Program
 data Decla = Axiom [VarDec] Expr 
-    | Theorem [VarDec] Expr [IdentStm]
+    | Theorem [VarDec] Expr [IdentWith Statement]
     | Define Ident [VarDec] Expr Expr
     | Predicate Ident Ident Expr [VarDec] Expr
     | DataType Ident Expr 
@@ -219,12 +219,14 @@ data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString, entFunAttr::FunAttr }
     | PredEntity { predSelf::String, predExtend::Fom, predDef::Fom, predName::String }  deriving (Show)
     
+type IdentWith a = (Ident, a)
+
 data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
-data IdentCmd = IdentCmd Ident Command deriving (Show)
-data IdentStm = IdentStm { identStmId::Ident, identStmStm::Statement } deriving (Show)
-data Statement = CmdStm IdentCmd Expr
-    | AssumeStm IdentCmd Expr [IdentStm]
-    | ForkStm [(IdentCmd, [IdentStm])]
+-- data IdentCmd = IdentCmd Ident Command deriving (Show)
+-- data IdentStm = IdentStm { identStmId::Ident, identStmStm::Statement } deriving (Show)
+data Statement = CmdStm (IdentWith Command) Expr
+    | AssumeStm (IdentWith Command) Expr [IdentWith Statement]
+    | ForkStm [(IdentWith Command, [IdentWith Statement])]
     | ExistsStm Ident [Ident] Expr
     | ForAllStm Ident Expr deriving (Show)
 

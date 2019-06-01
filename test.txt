@@ -69,6 +69,13 @@ axiom (A: Prop, B: Prop) {
 	~(A | B) >>= ~A | ~B
 }
 
+theorem (A, B: Prop) {
+	(A => B) => (A | ~B)
+proof:
+	step A
+	unfold A | ~B
+}
+
 dew
 theorem (A, B, P, Q: Prop) {
 	((A => P) & (B => Q)) => ((A & B) => (P & Q))
