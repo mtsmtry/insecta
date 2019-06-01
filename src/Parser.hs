@@ -117,7 +117,7 @@ parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
 parseToken:: Token -> Parser (Maybe Token)
 parseToken x = Parser $ \case
     [] -> ([], [], Nothing)
-    all@((PosToken _ t):ts) -> if t == x then ([], ts, Just x) else ([], all, Nothing)
+    all@(PosToken _ t:ts) -> if t == x then ([], ts, Just x) else ([], all, Nothing)
 parseSymbol x = parseToken (SymbolToken x)
 parseOperator x = parseToken (OperatorToken x)
 

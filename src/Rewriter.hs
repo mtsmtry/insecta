@@ -90,7 +90,8 @@ unifyWithAsg ptn@FunFom{} trg@(FunFom CFun _ _ _) = unifyFunNormal unifyArgs ptn
 unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFunExtract unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [] [] = Just
-    unifyArgs [] trgs = Just . M.insert "_" trg{funArgs=trgs}
+    unifyArgs [] [rest] = Just . M.insert "_" rest
+    unifyArgs [] rests = Just . M.insert "_" trg{funArgs=rests}
     unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs
     matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     matchForPtn ptn ptns noMatchTrgs [] = const Nothing
@@ -153,20 +154,20 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
             head = elemIndex f simps >>= Just . (f, )
             rest = concatMap lookupHeads (funArgs fun)
     lookupHeads _ = []
-    -- [ルール] -> 式 -> 結果
-    apply:: [Rule] -> Fom -> Maybe Fom
-    apply (rule:rules) trg = case unify (ruleBf rule) trg of
-        Just asg -> Just $ Rewrite (NormalReason rule asg) (assign asg (ruleAf rule)) trg
-        Nothing -> apply rules trg
-    apply [] _ = Nothing
     -- [ルール] -> 簡略性 -> 式 -> 結果
     applyAtSimp:: [Rule] -> Int -> Fom -> Maybe Fom
     applyAtSimp rules simp rew@(Rewrite res trg old) = applyAtSimp rules simp trg >>= \case
-        (Rewrite newRes new _)-> Just $ Rewrite newRes new rew
-        new -> Just $ Rewrite res new old
+        (Rewrite newRes new _)-> Just $ Rewrite newRes new rew -- rewrite whole
+        new -> Just $ Rewrite res new old                      -- rewrite argument
     applyAtSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
         fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
         rest = applyArgsOnce (applyAtSimp rules simp) fun
+        -- [ルール] -> 式 -> 結果
+        apply:: [Rule] -> Fom -> Maybe Fom
+        apply (rule:rules) trg = case unify (ruleBf rule) trg of
+            Just asg -> Just $ Rewrite (NormalReason rule asg) (assign asg (ruleAf rule)) trg
+            Nothing -> apply rules trg
+        apply [] _ = Nothing
     applyAtSimp _ _ _ = Nothing
     -- [(関数名, 簡略性)] -> 式 -> 結果
     applyByHeadList:: [(String, Int)] -> Fom -> Maybe Fom
@@ -256,6 +257,7 @@ derivateUnfold = applyDiff unfold where
     unfold (trg, def) = return $ if trg == def then Just trg else Nothing
 -- [[x+0+0, x+0], x] x
 -- f(x+0+0),f(x+0)
+-- f(x+0+0),f(x+0)
 -- g(x+0+0,x+0),g(x+0,x)
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
@@ -264,16 +266,16 @@ mergeRewrite = mergeRewrite Nothing where
         then mergeRewrite (Just (r, a, r')) b b'
         else case junction of
             Just (jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
-            Nothing -> Nothing
+            Nothing -> error $ show a ++ show a'
     mergeRewrite _ former latter@(Rewrite r a b) = if former == a
         then mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
-        else Nothing
+        else error $ "1\n" ++ show former ++ show a
     mergeRewrite _ former@(Rewrite r a b) latter = if a == latter
         then mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
-        else Nothing
+        else error $ "2\n" ++ show a ++ "\n\n" ++ show latter
     mergeRewrite _ funA@FunFom{} funB@FunFom{} = if funName funA == funName funB
         then (\x-> funA{funArgs=x}) <$> conjMaybe (zipWith (mergeRewrite Nothing) (funArgs funA) (funArgs funB))
-        else Nothing
+        else error $ "3\n" ++ show funA ++ show funB
     mergeRewrite _ a b = if a == b then Just a else Nothing
 
     appendStep:: Reason -> Fom -> Fom -> Fom
