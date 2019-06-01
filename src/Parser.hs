@@ -215,18 +215,18 @@ parseStatement omap = parseCmd >>= \case
     other idCmd = return (Just $ CmdStm idCmd) <++> parseExpr omap
     parseCmd:: Parser (Maybe (IdentWith Command))
     parseCmd = parseIdent >>= \case
-        Just id@(Ident _ "step") -> return $ Just $ (id, StepCmd)
-        Just id@(Ident _ "impl") -> return $ Just $ (id, ImplCmd)
-        Just id@(Ident _ "unfold") -> return $ Just $ (id, UnfoldCmd)
-        Just id@(Ident _ "begin") -> return $ Just $ (id, BeginCmd)
-        Just id@(Ident _ "target") -> return $ Just $ (id, TargetCmd)
+        Just id@(Ident _ "step") -> return $ Just (id, StepCmd)
+        Just id@(Ident _ "impl") -> return $ Just (id, ImplCmd)
+        Just id@(Ident _ "unfold") -> return $ Just (id, UnfoldCmd)
+        Just id@(Ident _ "begin") -> return $ Just (id, BeginCmd)
+        Just id@(Ident _ "target") -> return $ Just (id, TargetCmd)
         Just id@Ident{} -> return $ Just (id, WrongCmd)
         Nothing -> return Nothing
     parseBlock:: Parser (Maybe [IdentWith Statement])
     parseBlock = return (Just id) <::> parseSymbol "{" <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
     withIdent:: Ident -> Parser (Maybe a) -> Parser (Maybe (IdentWith a))
     withIdent id parse = parse >>= \case
-        Just item -> return $ Just $ (id, item)
+        Just item -> return $ Just (id, item)
         Nothing -> return Nothing
 
 parseVarDecs:: OpeMap -> Parser (Maybe VarDec)
@@ -298,11 +298,6 @@ parseProgram prg = (msg ++ msg', declas, omap) where
     (msg, pos, rest, tokens) = runLexer tokenize (initialPosition, prg)
     (msg', rest', (declas, omap)) = runParser parseProgramNoLex tokens
 
-lexer str = (\(_, _, _, x)-> x) $ runLexer tokenize (initialPosition, str)
-parser p t = (\(_, _, x)-> x) $ runParser p t
-
-tokenizeTest line = intercalate "," $ map show $ lexer line
-parserTest x = show . parser x . lexer
-
 parseExprs:: OpeMap -> String -> [Expr]
-parseExprs omap str = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str)
+parseExprs omap str = (\(_, _, x)-> x) (runParser (parseCommaSeparated $ parseExpr omap) $ lexer str) where
+    lexer str = (\(_, _, _, x)-> x) $ runLexer tokenize (initialPosition, str)

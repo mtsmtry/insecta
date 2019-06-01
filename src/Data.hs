@@ -145,6 +145,9 @@ data Reason = NormalReason Rule AssignMap
 instance Eq Reason where
     a == b = False
 
+makeBinary:: String -> Fom -> Fom -> Fom
+makeBinary str a b = FunFom OFun (Ident NonePosition str) propType [a, b]
+
 showIdent:: Fom -> Ident
 showIdent fom@FunTypeFom{} = funTypeIdent fom
 showIdent fom@FunFom{} = funName fom

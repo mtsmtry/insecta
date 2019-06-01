@@ -13,21 +13,23 @@ import Library
 import Data
 
 instance Eq Fom where
-    a@FunFom{} == b@FunFom{} = funName a == funName b && funType a == funType b && case (funAttr a, funAttr b) of
+    a@FunFom{} == b@FunFom{} = sameAttr && case (funAttr a, funAttr b) of
             (ACFun{}, _) -> equalACFun a b
             (_, ACFun{}) -> equalACFun a b
             _ -> funArgs a == funArgs b
         where
+        sameAttr:: Bool
+        sameAttr = funName a == funName b && funType a == funType b
         equalACFun:: Fom -> Fom -> Bool
         equalACFun a b = equalArgSet (funArgs a) (funArgs b) where
+        equalArgSet:: [Fom] -> [Fom] -> Bool
+        equalArgSet xs ys = length xs == length ys && equalArgSet xs ys where
             equalArgSet:: [Fom] -> [Fom] -> Bool
-            equalArgSet xs ys = length xs == length ys && equalArgSet xs ys where
-                equalArgSet:: [Fom] -> [Fom] -> Bool
-                equalArgSet [] [] = True
-                equalArgSet (x:xs) ys = maybe False (equalArgSet xs) $ equalRest x ys []
-            equalRest:: Fom -> [Fom] -> [Fom] -> Maybe [Fom]
-            equalRest x [] _ = Nothing
-            equalRest x (y:ys) rest = if x == y then Just $ ys ++ rest else equalRest x ys (y:rest)
+            equalArgSet [] [] = True
+            equalArgSet (x:xs) ys = maybe False (equalArgSet xs) $ equalRest x ys []
+        equalRest:: Fom -> [Fom] -> [Fom] -> Maybe [Fom]
+        equalRest x [] _ = Nothing
+        equalRest x (y:ys) rest = if x == y then Just $ ys ++ rest else equalRest x ys (y:rest)
     (PredFom vl ty) == (PredFom vl' ty') = vl == vl' && ty == ty'
     (FunTypeFom id args ret) == (FunTypeFom id' args' ret') = id == id' && args == args' && ret == ret'
     (CstFom a x) == (CstFom b y) = a == b && x == y
@@ -58,8 +60,6 @@ normalizeEx _ fom = fom
 
 (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <||> b = \m-> a m <|> b m
-(<&&>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
-a <&&> b = a >=> b
 
 extractArgs:: String -> Fom -> [Fom]
 extractArgs str fun@FunFom{} = if str == idStr (funName fun)
@@ -98,7 +98,7 @@ unifyArgsOrder ptns args = if length ptns /= length args
     else unifyArgs ptns args
     where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs (e:ex) (e':ex') = unifyWithAsg e e' <&&> unifyArgs ex ex'
+    unifyArgs (e:ex) (e':ex') = unifyWithAsg e e' >=> unifyArgs ex ex'
     unifyArgs [] [] = Just
     unifyArgs _ _ = const Nothing
 
@@ -109,19 +109,15 @@ unifyWithAsg TypeOfType TypeOfType = Just
 unifyWithAsg ptn@(CstFom id ty) trg@(CstFom id' ty') = if id == id' then unifyWithAsg ty ty' else const Nothing
 unifyWithAsg ptn@NumFom{} trg = if ptn == trg then Just else const Nothing
 unifyWithAsg ptn@StrFom{} trg = if ptn == trg then Just else const Nothing
-unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl ptnVl <&&> unifyWithAsg trgTy ptnTy
-
+unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl ptnVl >=> unifyWithAsg trgTy ptnTy
 unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
     Just x -> if x == trg then Just m else Nothing
     Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
-
 unifyWithAsg ptn@FunFom{} trg@(FunFom OFun _ _ _) = unifyFun unifyArgsOrder ptn trg
 unifyWithAsg ptn@FunFom{} trg@(FunFom AFun _ _ _) = unifyFun unifyArgsOrder ptn trg
-
 unifyWithAsg ptn@FunFom{} trg@(FunFom CFun _ _ _) = unifyFun unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' <&&> unifyWithAsg b b') <||> (unifyWithAsg a b' <&&> unifyWithAsg b a')
-
+    unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' >=> unifyWithAsg b b') <||> (unifyWithAsg a b' >=> unifyWithAsg b a')
 unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFun unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [] [] = Just
@@ -131,9 +127,8 @@ unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFun unifyArgs ptn 
     matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     matchForPtn ptn ptns noMatchTrgs [] = const Nothing
     matchForPtn ptn ptns noMatchTrgs (trg:restTrgs) = main <||> rest where
-        main = unifyWithAsg ptn trg <&&> unifyArgs ptns (noMatchTrgs ++ restTrgs)
+        main = unifyWithAsg ptn trg >=> unifyArgs ptns (noMatchTrgs ++ restTrgs)
         rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
-
 unifyWithAsg _ _ = const Nothing
 
 unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
@@ -177,11 +172,10 @@ simplify:: Fom -> Analyzer Fom
 simplify fom = do
     simp <- fmap conSimp getContext
     list <- fmap conList getContext
-    return $ stepLoop list simp fom
+    return $ simplifyStepLoop list simp fom
 
-stepLoop:: Simplicity -> RuleMap -> Fom -> Fom
-stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
-    -- 式 -> [(関数名, 関数の簡略性)]
+simplifyStepLoop:: Simplicity -> RuleMap -> Fom -> Fom
+simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplifyStep _fom where
     lookupHeads:: Fom -> [(String, Int)]
     lookupHeads rew@Rewrite{} = lookupHeads $ rewLater rew
     lookupHeads fun@FunFom{} = maybe rest (:rest) head where
@@ -189,28 +183,24 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
             head = elemIndex f simps >>= Just . (f, )
             rest = concatMap lookupHeads (funArgs fun)
     lookupHeads _ = []
-    -- [ルール] -> 簡略性 -> 式 -> 結果
-    applyAtSimp:: [Rule] -> Int -> Fom -> Maybe Fom
-    applyAtSimp rules simp rew@(Rewrite res trg old) = applyAtSimp rules simp trg >>= \case
+    applyWithSimp:: [Rule] -> Int -> Fom -> Maybe Fom
+    applyWithSimp rules simp rew@(Rewrite res trg old) = applyWithSimp rules simp trg >>= \case
         (Rewrite newRes new _)-> Just $ Rewrite newRes new rew -- rewrite whole
         new -> Just $ Rewrite res new old                      -- rewrite argument
-    applyAtSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
+    applyWithSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
         fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
-        rest = normalizeRewrite <$> applyArgsOnce (applyAtSimp rules simp) fun
-        -- [ルール] -> 式 -> 結果
+        rest = normalizeRewrite <$> applyArgsOnce (applyWithSimp rules simp) fun
         apply:: [Rule] -> Fom -> Maybe Fom
         apply (rule:rules) trg = case unify (ruleBf rule) trg of
             Just asg -> Just $ Rewrite (NormalReason rule asg) (assign asg (ruleAf rule)) trg
             Nothing -> apply rules trg
         apply [] _ = Nothing
-    applyAtSimp _ _ _ = Nothing
-    -- [(関数名, 簡略性)] -> 式 -> 結果
+    applyWithSimp _ _ _ = Nothing
     applyByHeadList:: [(String, Int)] -> Fom -> Maybe Fom
     applyByHeadList [] _ = Nothing
-    applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyAtSimp x s e) <|> applyByHeadList xs e
-    -- 式 -> 結果
-    step:: Fom -> Maybe Fom
-    step e = applyByHeadList heads e where
+    applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyWithSimp x s e) <|> applyByHeadList xs e
+    simplifyStep:: Fom -> Maybe Fom
+    simplifyStep e = applyByHeadList heads e where
         simpCompare (_, a) (_, b) = compare b a
         heads = sortBy simpCompare $ lookupHeads e
 
@@ -251,10 +241,7 @@ derivate = applyDiff derivateByRuleList where
     derivateByRuleList:: Derivater
     derivateByRuleList pair@(FunFom _ h ty as, goal) = do
         rmap <- fmap conImpl getContext
-        let or a' b' = do
-                a <- a'
-                b <- b'
-                return $ a <|> b
+        let or a b = a >>= \x-> b >>= return . (<|>x)
         case M.lookup (idStr h) rmap of
             Just rules -> foldr (or . flip derivateByRule pair) (return Nothing) rules
             Nothing -> return Nothing
