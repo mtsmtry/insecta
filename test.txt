@@ -21,6 +21,9 @@ infixl 1  <=>
 data N = Zero | Succ(N)
 undef R: Type
 
+undef f: N->N
+undef g: (N, N)->N
+
 undef operator +	: (N, N)->N 			latex "+" 
 undef operator *	: (N, N)->N 			latex "\cdot"
 # undef operator =>	: (Prop, Prop)->Prop 	latex "\rightarrow"

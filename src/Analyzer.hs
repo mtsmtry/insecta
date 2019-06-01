@@ -113,13 +113,13 @@ buildRule (FunExpr id@(Ident _ kind) [bf, af]) = do
         ">>=" -> sameType SimpRule bfFom $ makeACRestTrgsBox (bfFom, afFom)
         "<=>" -> checkType EqualRule "Prop" bfFom $ makeACRestTrgsBox (bfFom, afFom)
         "="   -> sameType EqualRule bfFom afFom
-        _     -> analyzeErrorM id "無効なルールです"
+        _     -> analyzeErrorM id "無効な命題です"
     where
     checkType:: RuleKind -> String -> Maybe Fom -> Maybe Fom -> Analyzer (Maybe Rule)
     checkType kind ty bf af = do
         chBf <- checkType bf
         chAf <- checkType af
-        return $ Rule kind id Nothing <$> (getLabel =<< chBf) <*> chAf <*> chAf
+        return $ Rule kind id Nothing <$> (getLabel =<< chBf) <*> chBf <*> chAf
         where
         checkType (Just fom) = if evalType fom == makeType ty 
             then return $ Just fom

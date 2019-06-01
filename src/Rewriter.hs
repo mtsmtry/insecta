@@ -120,7 +120,7 @@ insertSimp id a b = case (funIdent a, funIdent b) of
     (Just fn, Just gn) -> insertSimpByName (idStr fn) (idStr gn)
     (Nothing, Just gn) -> analyzeError id "定数は関数よりも常に簡単なため、定数を左辺に使うことはできません"
     (Just fn, Nothing) -> updateList $ \list-> let f = idStr fn in if f `elem` list then list else f:list
-    (Nothing, Nothing) -> analyzeError id "全ての定数は等しい簡略性を持つため、定数を両端に持つルールは無効です"
+    (Nothing, Nothing) -> analyzeError id "全ての定数は等しい簡略性を持つため、定数を両端に持つ命題は無効です"
     where
     funIdent:: Fom -> Maybe Ident
     funIdent fun@FunFom{} = Just $ funName fun
@@ -129,7 +129,7 @@ insertSimp id a b = case (funIdent a, funIdent b) of
     insertSimpByName f g = do
         m <- fmap conList getContext
         case (elemIndex f m, elemIndex g m) of
-            (Just fi, Just gi) -> when (fi > gi) $ analyzeError id "すでに宣言されたルールから推論した関数の簡略性によると、左辺の方が右辺よりも簡単です"
+            (Just fi, Just gi) -> when (fi > gi) $ analyzeError id "すでに宣言された命題から推論した関数の簡略性によると、左辺の方が右辺よりも簡単です"
             (Just fi, Nothing) -> updateList $ insertAt g fi
             (Nothing, Just gi) -> updateList $ insertAt f (gi+1)
             (Nothing, Nothing) -> updateList $ \m-> if f == g then f:m else g:f:m
@@ -161,7 +161,9 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
     apply [] _ = Nothing
     -- [ルール] -> 簡略性 -> 式 -> 結果
     applyAtSimp:: [Rule] -> Int -> Fom -> Maybe Fom
-    applyAtSimp rules simp (Rewrite r a b) = applyAtSimp rules simp a >>= (\x-> Just $ Rewrite r x b)
+    applyAtSimp rules simp rew@(Rewrite res trg old) = applyAtSimp rules simp trg >>= \case
+        (Rewrite newRes new _)-> Just $ Rewrite newRes new rew
+        new -> Just $ Rewrite res new old
     applyAtSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
         fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
         rest = applyArgsOnce (applyAtSimp rules simp) fun
@@ -252,7 +254,9 @@ derivateUnfold = applyDiff unfold where
             return $ maybe Nothing (\args-> Just trg{funArgs=args}) $ conjMaybe mArgs
         else return Nothing
     unfold (trg, def) = return $ if trg == def then Just trg else Nothing
-
+-- [[x+0+0, x+0], x] x
+-- f(x+0+0),f(x+0)
+-- g(x+0+0,x+0),g(x+0,x)
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
     mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom
