@@ -23,7 +23,3 @@ toJsonFormatedWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
 toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ show k ++ ": " ++ f v) (M.toList m)) ++ "\n}"
 
 maybeFlip input nothing just = maybe nothing just input
-
-extractMaybe:: [Maybe a] -> [a]
-extractMaybe [] = []
-extractMaybe (x:xs) = maybe (extractMaybe xs) (:extractMaybe xs) x

@@ -244,26 +244,32 @@ derivateExists = applyDiff derivateExists where
 
 derivateUnfold:: Derivater
 derivateUnfold = applyDiff unfold where
+    getMaybe (Just (Just x)) = Just x
+    getMaybe _ = Nothing
     unfold:: Derivater
-    unfold (trg@(VarFom id UnknownFom), VarFom _ ty) = do
-        insertEnt False id ty
-        return $ Just trg
-    unfold (trg@(VarFom _ trgTy), VarFom _ defTy) = return $ if trgTy == defTy then Just trg else Nothing
-    unfold (trg@FunFom{}, def@FunFom{}) = if funName trg == funName def
-        then do
-            mArgs <- mapM unfold $ zip (funArgs trg) (funArgs def)
-            return $ maybe Nothing (\args-> Just trg{funArgs=args}) $ conjMaybe mArgs
-        else return Nothing
-    unfold (trg, def) = return $ if trg == def then Just trg else Nothing
+    unfold (bg@FunFom{}, gl) = do
+        mEnt <- lookupEnt (idStr $ funName bg)
+        case mEnt of
+            Just ent -> do
+                let asg = unify <$> entDef ent <*> Just gl
+                maybe (return Nothing) (insertEntFromAsg ent) (getMaybe asg)
+        where
+        insertEntFromAsg:: Entity -> AssignMap -> Analyzer (Maybe Fom)
+        insertEntFromAsg ent asg = do
+            mapM_ addEnt (M.toList asg)
+            return $ Just $ Rewrite (UnfoldReason ent asg) gl bg
+        addEnt (str, VarFom id ty) = do
+            mEnt <- lookupEnt (idStr id)
+            maybe (insertEnt False id ty) (const $ return ()) mEnt
+        addEnt _ = return ()
+    unfold _ = return Nothing
 
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
     mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom
     mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = case mergeRewrite Nothing a a' of
         Just res -> if hasRewrite res then Just $ appendStep r' (Rewrite r res b) b' else mergeRewrite (Just (r, a, r')) b b'
-        Nothing -> case junction of
-            Just (jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
-            Nothing -> error $ show a ++ show a'
+        Nothing -> junction >>= \(jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
     mergeRewrite _ former latter@(Rewrite r a b) = mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
     mergeRewrite _ former@(Rewrite r a b) latter = mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
     mergeRewrite _ funA@FunFom{} funB@FunFom{} = if funName funA == funName funB

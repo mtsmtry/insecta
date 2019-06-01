@@ -233,7 +233,7 @@ buildStrategy all@((id, cmd):xs) = case cmd of
         rew <- buildStrategyRewriteList all
         return $ Strategy (StrategyOriginIdent id StrategyOriginAuto) rew
     where
-    buildStrategyRewriteList xs = extractMaybe <$> mapM buildStrategyRewrite xs
+    buildStrategyRewriteList xs = catMaybes <$> mapM buildStrategyRewrite xs
 
 buildProofOrigin:: StrategyOrigin -> Analyzer (ProofOrigin, Fom)
 buildProofOrigin (StrategyOriginContext con) = do
@@ -375,15 +375,16 @@ loadDecla (Undef id ty mTex) = do
     maybe (return ()) (\ty-> insertEntWithLatex True id ty mTex) mTy
     
 loadDecla (Define id decs ret def) = do
-    (mArgTys, mRetTy) <- subScope $ do
+    (mArgTys, mRetTy, mDef) <- subScope $ do
         loadVarDecs decs
         mArgTys <- mapM (buildFom . snd) (last decs)
         mRetTy <- buildFom ret
-        return (mArgTys, mRetTy)
-    case (conjMaybe mArgTys, mRetTy) of
-        (Just argTys, Just retTy) -> do
+        mDef <- buildFom def
+        return (mArgTys, mRetTy, mDef)
+    case (conjMaybe mArgTys, mRetTy, mDef) of
+        (Just argTys, Just retTy, Just def) -> do
             let ty = FunTypeFom { funTypeIdent = id, funArgTypes = argTys, funRetType = retTy }
-            insertEnt True id ty
+            insertEntWithDef True id ty def
         _ -> return ()
 
 loadDecla (DataType id def) = do

@@ -73,10 +73,10 @@ axiom (A: Prop, B: Prop) {
 }
 
 theorem (x, y: N) {
-	x + 0 + 0 + 0 + y => x + 0 + y
+	x + 0 + 0 + 0 + y >>= x + 0 + y
 proof:
 	step x + y
-	step x + 0 + y
+	step x + 0 + y + 0 + 0 * 1
 }
 
 theorem (A, B: Prop) {

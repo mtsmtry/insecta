@@ -138,6 +138,7 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | TypeOfType deriving (Eq, Show)
 
 data Reason = NormalReason Rule AssignMap 
+    | UnfoldReason Entity AssignMap
     | EqualReason deriving (Show)
 
 instance Eq Reason where
@@ -216,7 +217,7 @@ data Decla = Axiom [VarDec] Expr
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 
-data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString, entFunAttr::FunAttr }
+data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString, entFunAttr::FunAttr, entDef::Maybe Fom }
     | PredEntity { predSelf::String, predExtend::Fom, predDef::Fom, predName::String }  deriving (Show)
     
 type IdentWith a = (Ident, a)
@@ -268,7 +269,7 @@ newContext omap = Context {
         conEnt=buildInScope,
         conPred=M.empty }
     where
-    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=Nothing, entFunAttr=OFun }
+    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing }
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
 
@@ -303,11 +304,15 @@ updateFunAttr name f = updateEnt $ M.adjust (\ent-> ent{entFunAttr=f $ entFunAtt
     
 insertEnt:: Bool -> Ident -> Fom -> Analyzer ()
 insertEnt const id ty = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing, entFunAttr=OFun })
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing })
+
+insertEntWithDef:: Bool -> Ident -> Fom -> Fom -> Analyzer ()
+insertEntWithDef const id ty def = updateEnt $ M.insert (idStr id) 
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing, entFunAttr=OFun, entDef=Just def })
 
 insertEntWithLatex:: Bool -> Ident -> Fom -> Maybe EmbString -> Analyzer ()
 insertEntWithLatex const id ty latex = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=latex, entFunAttr=OFun })
+    (Entity { entName=show id, entType=ty, entConst=const, entLatex=latex, entFunAttr=OFun, entDef=Nothing })
 
 lookupEnt:: String -> Analyzer (Maybe Entity)
 lookupEnt str = do
