@@ -161,7 +161,7 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
     apply [] _ = Nothing
     -- [ルール] -> 簡略性 -> 式 -> 結果
     applyAtSimp:: [Rule] -> Int -> Fom -> Maybe Fom
-    applyAtSimp rules simp (Rewrite r a b) = applyAtSimp rules simp a
+    applyAtSimp rules simp (Rewrite r a b) = applyAtSimp rules simp a >>= (\x-> Just $ Rewrite r x b)
     applyAtSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
         fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
         rest = applyArgsOnce (applyAtSimp rules simp) fun
@@ -173,7 +173,7 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
     -- 式 -> 結果
     step:: Fom -> Maybe Fom
     step e = applyByHeadList heads e where
-        simpCompare (_, a) (_, b) = compare a b
+        simpCompare (_, a) (_, b) = compare b a
         heads = sortBy simpCompare $ lookupHeads e
 
 type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
