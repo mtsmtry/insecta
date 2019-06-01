@@ -18,18 +18,18 @@ import Visualizer
 onRule:: (Fom -> Fom -> Bool) -> Rule -> Bool
 onRule f rule = f (ruleBf rule) (ruleAf rule)
 
-isAssociativeRule:: Rule -> Bool
-isAssociativeRule = onRule isAssociative where
-    isAssociative:: Fom -> Fom -> Bool
-    isAssociative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
-        ([a, b], [c, d]) -> funName bf == funName af && a == d && b == c
-        _ -> False
-    isAssociative _ _ = False
-
 isCommutativeRule:: Rule -> Bool
 isCommutativeRule = onRule isCommutative where
     isCommutative:: Fom -> Fom -> Bool
     isCommutative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
+        ([a, b], [c, d]) -> funName bf == funName af && a == d && b == c
+        _ -> False
+    isCommutative _ _ = False
+
+isAssociativeRule:: Rule -> Bool
+isAssociativeRule = onRule isAssociative where
+    isAssociative:: Fom -> Fom -> Bool
+    isAssociative bf@FunFom{} af@FunFom{} = case (funArgs bf, funArgs af) of
         ([f@FunFom{}, c], [x, g@FunFom{}]) -> case (funArgs f, funArgs g) of
             ([a, b], [y, z]) -> sameName [bf, af, f, g] && all (uncurry (==)) [(a, x), (b, y), (c, z)]
             _ -> False
@@ -40,7 +40,7 @@ isCommutativeRule = onRule isCommutative where
         where
         sameName:: [Fom] -> Bool
         sameName (x:xs) = let name = funName x in all (\t-> name == funName t) xs
-    isCommutative _ _ = False
+    isAssociative _ _ = False
 
 data BuildFomOption = AllowUndefined | NotAllowUndefined deriving(Eq, Show)
 
@@ -48,7 +48,10 @@ buildFom:: Expr -> Analyzer (Maybe Fom)
 buildFom = buildFomEx NotAllowUndefined
 
 buildFomEx:: BuildFomOption -> Expr -> Analyzer (Maybe Fom)
-buildFomEx opt = buildFom where
+buildFomEx opt exp = do
+    fom <- buildFom exp
+    return $ normalize <$> fom
+    where
     buildFom:: Expr -> Analyzer (Maybe Fom)
     buildFom (NumExpr num) = return $ Just $ NumFom num
     buildFom (StrExpr str) = return $ Just $ StrFom str

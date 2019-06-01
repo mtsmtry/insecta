@@ -57,19 +57,12 @@ axiom (A: Prop) { ~(~A) >>= A }
 axiom (A: Prop) { A & True >>= A }
 axiom (A: Prop) { A | True >>= True }
 axiom (A: Prop) { A & A >>= A }
+axiom (A: Prop) { A | A >>= A }
 
 def operator => (A, B: Prop): Prop { A | ~B }
 
 axiom (A: Prop) {
 	A | A >>= A
-}
-
-axiom (A: Prop, B: Prop) {
-	~(A & B) >>= ~A & ~B
-}
-
-axiom (A: Prop, B: Prop) {
-	~(A | B) >>= ~A | ~B
 }
 
 theorem (x, y: N) {
@@ -86,7 +79,6 @@ proof:
 	unfold A | ~B
 }
 
-dew
 theorem (A, B, P, Q: Prop) {
 	((A => P) & (B => Q)) => ((A & B) => (P & Q))
 proof:

@@ -12,6 +12,50 @@ import Control.Applicative
 import Library
 import Data
 
+instance Eq Fom where
+    a@FunFom{} == b@FunFom{} = funName a == funName b && funType a == funType b && case (funAttr a, funAttr b) of
+            (ACFun{}, _) -> equalACFun a b
+            (_, ACFun{}) -> equalACFun a b
+            _ -> funArgs a == funArgs b
+        where
+        equalACFun:: Fom -> Fom -> Bool
+        equalACFun a b = equalArgSet (funArgs a) (funArgs b) where
+            equalArgSet:: [Fom] -> [Fom] -> Bool
+            equalArgSet xs ys = length xs == length ys && equalArgSet xs ys where
+                equalArgSet:: [Fom] -> [Fom] -> Bool
+                equalArgSet [] [] = True
+                equalArgSet (x:xs) ys = maybe False (equalArgSet xs) $ equalRest x ys []
+            equalRest:: Fom -> [Fom] -> [Fom] -> Maybe [Fom]
+            equalRest x [] _ = Nothing
+            equalRest x (y:ys) rest = if x == y then Just $ ys ++ rest else equalRest x ys (y:rest)
+    (PredFom vl ty) == (PredFom vl' ty') = vl == vl' && ty == ty'
+    (FunTypeFom id args ret) == (FunTypeFom id' args' ret') = id == id' && args == args' && ret == ret'
+    (CstFom a x) == (CstFom b y) = a == b && x == y
+    (VarFom a x) == (VarFom b y) = a == b && x == y
+    (StrFom a) == (StrFom b) = a == b
+    (NumFom a) == (NumFom b) = a == b
+    UnknownFom == UnknownFom = True
+    TypeOfType == TypeOfType = True
+    _ == _ = False
+
+normalize:: Fom -> Fom
+normalize = normalizeEx const
+
+normalizeRewrite:: Fom -> Fom
+normalizeRewrite = normalizeEx $ Rewrite SortReason
+
+normalizeEx:: (Fom -> Fom -> Fom) -> Fom -> Fom
+normalizeEx rewrite fun@FunFom{} = case funAttr fun of
+    AFun -> nAssoc
+    ACFun{} -> nAssoc
+    _ -> fun{funArgs=map (normalizeEx rewrite) args}
+    where
+    nAssoc = if length args == length nArgs then fun else rewrite nFun fun
+    args = funArgs fun
+    nArgs = concatMap (extractArgs (idStr $ funName fun)) args
+    nFun = fun{funArgs=map (normalizeEx rewrite . latestFom) nArgs}
+normalizeEx _ fom = fom
+
 (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <||> b = \m-> a m <|> b m
 (<&&>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
@@ -42,20 +86,11 @@ convert from to = if from == to
 unify:: Fom -> Fom -> Maybe AssignMap
 unify ptn trg = unifyWithAsg ptn trg M.empty
 
-unifyFun:: ([Fom] -> [Fom] -> AssignMap -> Maybe AssignMap) -> Fom -> Fom -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-unifyFun unifyArgs ptn trg ptns trgs = if funName ptn /= funName trg then const Nothing else \m-> do
+unifyFun:: ([Fom] -> [Fom] -> AssignMap -> Maybe AssignMap) -> Fom -> Fom -> AssignMap -> Maybe AssignMap
+unifyFun unifyArgs ptn trg = if funName ptn /= funName trg then const Nothing else \m-> do
     tyAsg <- unifyWithAsg (funType ptn) (funType trg) m
-    vlAsg <- unifyArgs ptns trgs tyAsg
+    vlAsg <- unifyArgs (funArgs ptn) (funArgs trg) tyAsg
     return $ M.union tyAsg vlAsg
-
-unifyFunExtract::([Fom] -> [Fom] -> AssignMap -> Maybe AssignMap) -> Fom -> Fom -> AssignMap -> Maybe AssignMap
-unifyFunExtract unifyArgs ptn trg = unifyFun unifyArgs ptn trg ptns trgs where
-    name = idStr $ funName ptn
-    ptns = extractArgs name ptn
-    trgs = extractArgs name trg
-
-unifyFunNormal::([Fom] -> [Fom] -> AssignMap -> Maybe AssignMap) -> Fom -> Fom -> AssignMap -> Maybe AssignMap
-unifyFunNormal unifyArgs ptn trg = unifyFun unifyArgs ptn trg (funArgs ptn) (funArgs trg)
 
 unifyArgsOrder:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
 unifyArgsOrder ptns args = if length ptns /= length args 
@@ -80,14 +115,14 @@ unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
     Just x -> if x == trg then Just m else Nothing
     Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
 
-unifyWithAsg ptn@FunFom{} trg@(FunFom OFun _ _ _) = unifyFunNormal unifyArgsOrder ptn trg
-unifyWithAsg ptn@FunFom{} trg@(FunFom AFun _ _ _) = unifyFunExtract unifyArgsOrder ptn trg
+unifyWithAsg ptn@FunFom{} trg@(FunFom OFun _ _ _) = unifyFun unifyArgsOrder ptn trg
+unifyWithAsg ptn@FunFom{} trg@(FunFom AFun _ _ _) = unifyFun unifyArgsOrder ptn trg
 
-unifyWithAsg ptn@FunFom{} trg@(FunFom CFun _ _ _) = unifyFunNormal unifyArgs ptn trg where
+unifyWithAsg ptn@FunFom{} trg@(FunFom CFun _ _ _) = unifyFun unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' <&&> unifyWithAsg b b') <||> (unifyWithAsg a b' <&&> unifyWithAsg b a')
 
-unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFunExtract unifyArgs ptn trg where
+unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFun unifyArgs ptn trg where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgs [] [] = Just
     unifyArgs [] [rest] = Just . M.insert "_" rest
@@ -161,7 +196,7 @@ stepLoop simps m _fom = maybe _fom (stepLoop simps m) $ step _fom where
         new -> Just $ Rewrite res new old                      -- rewrite argument
     applyAtSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
         fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
-        rest = applyArgsOnce (applyAtSimp rules simp) fun
+        rest = normalizeRewrite <$> applyArgsOnce (applyAtSimp rules simp) fun
         -- [ルール] -> 式 -> 結果
         apply:: [Rule] -> Fom -> Maybe Fom
         apply (rule:rules) trg = case unify (ruleBf rule) trg of
@@ -188,7 +223,7 @@ applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = if funName bg == funName g
         1 -> do
             let (xs', x:xs) = splitAt idx args
             res <- applyDiff derivater x
-            return $ (\t-> bg{funArgs=map snd xs' ++ t:map snd xs}) <$> res
+            return $ normalizeRewrite . (\t-> bg{funArgs=map snd xs' ++ t:map snd xs}) <$> res
         _ -> derivater pair
     else derivater pair where
         (as, bs) = (funArgs bg, funArgs gl)
@@ -263,7 +298,7 @@ derivateUnfold = applyDiff unfold where
             maybe (insertEnt False id ty) (const $ return ()) mEnt
         addEnt _ = return ()
     unfold _ = return Nothing
-
+-- (A & B & A | B & A & B) => P & Q, (A & B | A & B) => P & Q
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
     mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom

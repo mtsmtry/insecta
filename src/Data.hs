@@ -135,11 +135,12 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | NumFom IdentInt
     | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
     | UnknownFom
-    | TypeOfType deriving (Eq, Show)
+    | TypeOfType deriving (Show)
 
 data Reason = NormalReason Rule AssignMap 
     | UnfoldReason Entity AssignMap
-    | EqualReason deriving (Show)
+    | EqualReason 
+    | SortReason deriving (Show)
 
 instance Eq Reason where
     a == b = False

@@ -140,6 +140,37 @@ Proof.
 Qed.
 ```
 
+Isabelleと比較するとこんな感じです。
+
+- Insectaの場合
+```
+theorem (n: N) {
+    n >= 2 => n^2 >= 2*n
+proof:
+    impl n*n >= 2*n
+    step n^2 >= 2*n
+}
+```
+
+- Isabelleの場合
+```
+lemma ex':
+    fixes n :: nat
+    assumes "n ≥ 2"
+    shows "2*n ≤ n^2"
+using assms
+proof (induct n, simp)
+    fix n :: nat
+    assume a: "2 ≤ n ⟹ 2 * n ≤ n^2" and b: "2 ≤ Suc n"
+    have "2 * Suc n ≤ 2 * (n + 1)" using a b by simp
+    also have "… ≤ 2 * n + 2" by simp
+    also have "… ≤ n^2 + 2 * n + 1" using b by simp
+    also have "… = (n+1)^2" using power2_sum [of n 1] by auto
+    finally
+        show "2 * Suc n ≤ (Suc n)^2" by simp
+qed
+```
+
 # 文法
 ## 基本
 - ブロック
