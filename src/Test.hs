@@ -40,16 +40,34 @@ reasoning str = do
     let exps = if null str then [] else parseExprs omap str
     foms <- mapM (buildFomEx AllowUndefined) exps
     case foms of
-        [Just fom] -> do
-            let fomStr = show fom
-            res <- simplify fom
-            let latStr = show $ latestFom res
-            return $ fomStr ++ "\n" ++ latStr ++ "\n" ++ showFom omap res
+        [Just fom] -> simplifyTest omap fom
         [Just a, Just b] -> do
-            let fomStr = show a ++ "\n" ++ show b
-            res <- derivate (a, b)
-            return $ fomStr ++ "\n" ++ maybe "Nothing" (showFom omap) res
+            dev <- derivateTest omap a b
+            meg <- mergeTest omap a b
+            return $ dev ++ "\n\n" ++ meg
         _ -> return ""
+    
+simplifyTest:: OpeMap -> Fom -> Analyzer String
+simplifyTest omap fom = do 
+    let fomStr = show fom
+    res <- simplify fom
+    let latStr = show $ latestFom res
+    return $ fomStr ++ "\n" ++ latStr ++ "\n" ++ showFom omap res
+
+derivateTest:: OpeMap -> Fom -> Fom -> Analyzer String
+derivateTest omap a b = do
+    let fomStr = show a ++ "\n" ++ show b
+    mRes <- derivate (a, b)
+    return $ maybe "Nothing" (\res-> fomStr ++ "\n" ++ showFom omap res) mRes
+
+mergeTest:: OpeMap -> Fom -> Fom -> Analyzer String
+mergeTest omap a b = do
+    simpA <- simplify a
+    simpB <- simplify b
+    let merge = mergeRewrite simpA simpB
+    return $ "A:" ++ showFom omap simpA 
+        ++ "\nB:" ++ showFom omap simpB 
+        ++ "\nMerge:" ++ maybe "Nothing" (showFom omap) merge
 
 test x = forever $ getLine >>= (putStrLn . x)
 -- testFunc2 = test $ parserTest $ parseExpr M.empty

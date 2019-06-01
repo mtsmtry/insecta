@@ -69,10 +69,17 @@ axiom (A: Prop, B: Prop) {
 	~(A | B) >>= ~A | ~B
 }
 
+theorem (x, y: N) {
+	x + 0 + 0 + 0 + y => x + 0 + y
+proof:
+	step x + y
+	step x + 0 + y
+}
+
 theorem (A, B: Prop) {
 	(A => B) => (A | ~B)
 proof:
-	step A
+	step A => B
 	unfold A | ~B
 }
 

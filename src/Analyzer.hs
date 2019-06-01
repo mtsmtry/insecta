@@ -104,39 +104,42 @@ buildFomEx opt = buildFom where
                 return trg
         checkType _ _ = return Nothing
 
-getLabel:: Maybe Fom -> Maybe String
-getLabel (Just fun@FunFom{}) = Just $ idStr $ funName fun
-getLabel Nothing = Nothing
-
 buildRule:: Expr -> Analyzer (Maybe Rule)
-buildRule (FunExpr id@(Ident _ "=>") [bf, af]) = do
-    let checkType (Just fom) = unless (evalType fom == makeType "Prop") (analyzeError (funName fom) "命題ではありません")
-        checkType Nothing = return ()
+buildRule (FunExpr id@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
-    checkType bfFom
-    checkType afFom
-    return $ Rule ImplRule id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
-
-buildRule (FunExpr id@(Ident _ ">>=") [bf, af]) = makeEqualRule SimpRule id bf af
-buildRule (FunExpr id@(Ident _ "<=>") [bf, af]) = makeEqualRule EqualRule id bf af
-buildRule (FunExpr id@(Ident _ "=") [bf, af]) = makeEqualRule EqualRule id bf af
-
-buildRule exp = analyzeErrorM (showExprIdent exp) "無効なルールです"
-
-makeEqualRule kind id bf af = do
-    let checkType (Just bf) (Just af) = evalType bf == evalType af
-        checkType _ _ = False
-    bfFom <- buildFom bf
-    afFom' <- buildFom af
-    let sameFun name (FunFom (ACFun _) (Ident _ name') _ _) = name == name'
-        sameFun _ _ = False
-    let afFom = case (bfFom, afFom') of
-            (Just fun@(FunFom (ACFun _) (Ident _ name) _ _), Just fom) -> if sameFun name fom then afFom' else Just fun{funArgs=[fom]}
-            _ -> afFom'
-    if checkType bfFom afFom
-        then return $ Rule kind id Nothing <$> getLabel bfFom <*> bfFom <*> afFom
+    case kind of
+        "=>"  -> checkType ImplRule "Prop" bfFom afFom
+        ">>=" -> sameType SimpRule bfFom $ makeACRestTrgsBox (bfFom, afFom)
+        "<=>" -> checkType EqualRule "Prop" bfFom $ makeACRestTrgsBox (bfFom, afFom)
+        "="   -> sameType EqualRule bfFom afFom
+        _     -> analyzeErrorM id "無効なルールです"
+    where
+    checkType:: RuleKind -> String -> Maybe Fom -> Maybe Fom -> Analyzer (Maybe Rule)
+    checkType kind ty bf af = do
+        chBf <- checkType bf
+        chAf <- checkType af
+        return $ Rule kind id Nothing <$> (getLabel =<< chBf) <*> chAf <*> chAf
+        where
+        checkType (Just fom) = if evalType fom == makeType ty 
+            then return $ Just fom
+            else analyzeErrorM (funName fom) "命題ではありません"
+        checkType Nothing = return Nothing
+    getLabel:: Fom -> Maybe String
+    getLabel fun@FunFom{} = Just $ idStr $ funName fun
+    getLabel _ = Nothing
+    sameType:: RuleKind -> Maybe Fom -> Maybe Fom -> Analyzer (Maybe Rule)
+    sameType kind (Just bf) (Just af) = if evalType bf == evalType af
+        then return $ Rule kind id Nothing <$> getLabel bf <*> Just bf <*> Just af
         else analyzeErrorM id "両辺の型が一致しません"
+    sameType _ _ _ = return Nothing
+    makeACRestTrgsBox:: (Maybe Fom, Maybe Fom) -> Maybe Fom
+    makeACRestTrgsBox (Just fun@(FunFom (ACFun _) (Ident _ name) _ _), Just fom) = 
+        Just $ if sameFun name fom then fom else fun{funArgs=[fom]} 
+        where
+        sameFun name (FunFom (ACFun _) (Ident _ name') _ _) = name == name'
+        sameFun _ _ = False
+    makeACRestTrgsBox (_, fom) = fom
 
 returnMessage:: a -> Message -> Analyzer a
 returnMessage a m = Analyzer ([m], , a)
@@ -251,6 +254,13 @@ buildProofOrigin (StrategyOriginContext con) = do
 buildProofOrigin (StrategyOriginFom fom) = return (ProofOriginFom fom, fom)
 buildProofOrigin StrategyOriginWrong = return (ProofOriginWrong, UnknownFom)
 
+derivateError:: String -> Fom -> Command -> Fom -> Analyzer ProofCommand
+derivateError str trg cmd goal = do
+    strTrg <- onOpeMap showFom trg
+    strGoal <- onOpeMap showLatestFom goal
+    analyzeError (showIdent goal) $ str ++ "によって'" ++ strTrg ++ "'から'" ++ strGoal ++ "'を導出できません"
+    return $ ProofCommand cmd goal
+
 buildProofCommand:: Fom -> Command -> Fom -> Analyzer ProofCommand
 buildProofCommand trg StepCmd goal = do
     sTrg <- simplify trg
@@ -268,16 +278,13 @@ buildProofCommand trg ImplCmd goal = do
     res <- derivate (trg, goal)
     case res of
         Just proof -> return $ ProofCommand ImplCmd proof
-        Nothing -> do
-            strTrg <- onOpeMap showFom trg
-            strGoal <- onOpeMap showLatestFom goal
-            analyzeError (showIdent goal) $ "'" ++ strTrg ++ "'から'" ++ strGoal ++ "'を導出できません"
-            return $ ProofCommand ImplCmd goal
+        Nothing -> derivateError "含意命題" trg ImplCmd goal
 
 buildProofCommand trg UnfoldCmd goal = do
     res <- derivateUnfold (trg, goal)
     case res of
         Just proof -> return $ ProofCommand UnfoldCmd proof
+        Nothing -> derivateError "定義の展開" trg UnfoldCmd goal
 
 buildProofCommand trg WrongCmd goal = return $ ProofCommand WrongCmd goal
 

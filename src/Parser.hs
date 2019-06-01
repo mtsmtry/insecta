@@ -44,7 +44,6 @@ popToken = Lexer $ \(pos, all) -> case all of
     -- String -> Token
     toSymbol all = case all of "(" -> ParenOpen; ")" -> ParenClose; "," -> Comma; _ -> SymbolToken all
 
--- string to tokens
 tokenize:: Lexer [PosToken]
 tokenize = do
     mtoken <- popToken
