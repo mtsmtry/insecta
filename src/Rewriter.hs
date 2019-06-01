@@ -255,32 +255,28 @@ derivateUnfold = applyDiff unfold where
             return $ maybe Nothing (\args-> Just trg{funArgs=args}) $ conjMaybe mArgs
         else return Nothing
     unfold (trg, def) = return $ if trg == def then Just trg else Nothing
--- [[x+0+0, x+0], x] x
--- f(x+0+0),f(x+0)
--- f(x+0+0),f(x+0)
--- g(x+0+0,x+0),g(x+0,x)
+
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
     mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom
-    mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = if a == a'
-        then mergeRewrite (Just (r, a, r')) b b'
-        else case junction of
+    mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = case mergeRewrite Nothing a a' of
+        Just res -> if hasRewrite res then Just $ appendStep r' (Rewrite r res b) b' else mergeRewrite (Just (r, a, r')) b b'
+        Nothing -> case junction of
             Just (jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
             Nothing -> error $ show a ++ show a'
-    mergeRewrite _ former latter@(Rewrite r a b) = if former == a
-        then mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
-        else error $ "1\n" ++ show former ++ show a
-    mergeRewrite _ former@(Rewrite r a b) latter = if a == latter
-        then mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
-        else error $ "2\n" ++ show a ++ "\n\n" ++ show latter
+    mergeRewrite _ former latter@(Rewrite r a b) = mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
+    mergeRewrite _ former@(Rewrite r a b) latter = mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
     mergeRewrite _ funA@FunFom{} funB@FunFom{} = if funName funA == funName funB
         then (\x-> funA{funArgs=x}) <$> conjMaybe (zipWith (mergeRewrite Nothing) (funArgs funA) (funArgs funB))
-        else error $ "3\n" ++ show funA ++ show funB
+        else Nothing
     mergeRewrite _ a b = if a == b then Just a else Nothing
-
     appendStep:: Reason -> Fom -> Fom -> Fom
     appendStep r' t (Rewrite r a b) = Rewrite r a (appendStep r' t b)
     appendStep r t u = Rewrite r u t
+    hasRewrite:: Fom -> Bool
+    hasRewrite Rewrite{} = True
+    hasRewrite fun@FunFom{} = all hasRewrite $ funArgs fun
+    hasRewrite _ = False
 
 lookupVars:: Fom -> [Ident]
 lookupVars fun@FunFom{} = concatMap lookupVars $ funArgs fun
