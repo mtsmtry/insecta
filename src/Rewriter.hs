@@ -87,7 +87,6 @@ unifyArgsOrder ptns args = if length ptns /= length args
 unifyArgsRandom:: ([Fom] -> AssignMap -> Maybe AssignMap) -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
 unifyArgsRandom restInserter = unifyArgs where
     unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs [] [] = Just
     unifyArgs [] rests = restInserter rests
     unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs
     matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
@@ -111,7 +110,7 @@ unifyWithAsg ptn@FunFom{} trg@FunFom{} = case funAttr trg of
     OFun -> unifyFun unifyArgsOrder ptn trg
     CFun -> unifyFun unifyArgsComm ptn trg
     AFun -> unifyFun unifyArgsOrder ptn trg
-    ACFun -> unifyFun (unifyArgsRandom $ const $ const Nothing) ptn trg
+    ACFun -> unifyFun (unifyArgsRandom $ \case []-> Just; _-> const Nothing) ptn trg
     where
     unifyArgsComm:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgsComm [a, b] [a', b'] = (unifyWithAsg a a' >=> unifyWithAsg b b') <||> (unifyWithAsg a b' >=> unifyWithAsg b a')
@@ -127,7 +126,7 @@ unifyList f (x:xs) trg = case unify (f x) trg of
 
 assign:: AssignMap -> Fom -> Fom
 assign m var@(VarFom id ty) = fromMaybe var $ M.lookup (idStr id) m
-assign m fun@(FunFom ACFun _ _ _) = fun{funArgs=concatMap toArray args} where
+assign m fun@(FunFom ACFun _ _ _) = case concatMap toArray args of [x]-> x; xs-> fun{funArgs=xs}; where
     args = map (assign m) $ funArgs fun
     toArray arg@FunFom{} = if funName arg == funName fun then funArgs arg else [arg]
     toArray arg = [arg]

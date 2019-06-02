@@ -66,17 +66,17 @@ axiom (A: Prop) {
 }
 
 theorem (A, B: Prop) {
-	(A => B) => (A | ~B)
+	(A => B) => (~A | B)
 proof:
 	step A => B
-	unfold A | ~B
+	unfold ~A | B & B & B
 }
 
 theorem (A, B, P, Q: Prop) {
 	((A => P) & (B => Q)) => ((A & B) => (P & Q))
 proof:
 	step (A => P) & (B => Q)
-	step (~A | P) & (~B | Q)
+	unfold (~A | P) & (~B | Q)
 	step ~A & ~B | ~A & Q | P & ~B | P & Q
 	impl ~A & ~B | ~A | P & ~B | P & Q
 	impl ~A & ~B | ~A | ~B | P & Q

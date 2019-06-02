@@ -166,13 +166,13 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
 
     normalizeACRule:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
     normalizeACRule (a, b) = do 
-        a' <- maybe (return Nothing) normalizeACACRest a
-        b' <- maybe (return Nothing) normalizeACACRest b
+        a' <- maybe (return Nothing) normalizeACRest a
+        b' <- maybe (return Nothing) normalizeACRest b
         return $ boxACRest (a', b')
-    normalizeACACRest:: Fom -> Analyzer (Maybe Fom)
-    normalizeACACRest fun@(FunFom ACFun _ _ _) = do
+    normalizeACRest:: Fom -> Analyzer (Maybe Fom)
+    normalizeACRest fun@(FunFom ACFun _ _ _) = do
         let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap $ funArgs fun
-        args <- conjMaybe <$> mapM normalizeACACRest (funArgs fun)
+        args <- conjMaybe <$> mapM normalizeACRest (funArgs fun)
         case oneEmergeVars of
             [] -> return $ (\x-> fun{funArgs=x}) <$> args
             [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
@@ -186,7 +186,7 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
             varEmergeMap:: Fom -> State (M.Map String Int) ()
             varEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
             varEmergeMap fom = return ()
-    normalizeACACRest fom = return $ Just fom
+    normalizeACRest fom = return $ Just fom
     boxACRest:: (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom)
     boxACRest (Just fun@(FunFom ACFun id ty _), Just af) =
         (Just $ ACRestFom "_" fun, Just fun{funArgs=[VarFom (Ident NonePosition "_") ty, af]})
