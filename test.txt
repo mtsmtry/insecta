@@ -48,10 +48,10 @@ undef False	: Prop
 axiom { ~False >>= True  }
 axiom { ~True  >>= False }
 
-axiom (A, B: Prop) 		{ A | B <=> B | A }
-axiom (A, B, C: Prop) 	{ A | (B | C) <=> (A | B) | C }
 axiom (A, B: Prop) 		{ A & B <=> B & A }
 axiom (A, B, C: Prop) 	{ A & (B & C) <=> (A & B) & C }
+axiom (A, B: Prop) 		{ A | B <=> B | A }
+axiom (A, B, C: Prop) 	{ A | (B | C) <=> (A | B) | C }
 
 axiom (A: Prop) { ~(~A) >>= A }
 axiom (A: Prop) { A | True >>= True }

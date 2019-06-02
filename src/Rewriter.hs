@@ -40,7 +40,7 @@ extractArgs:: String -> Fom -> [Fom]
 extractArgs str fun@FunFom{} = if str == idStr (funName fun)
     then concatMap (extractArgs str) (funArgs fun)
     else [fun]
-extractArgs str expr = [expr]
+extractArgs str fom = [fom]
 
 convert:: Fom -> Fom -> Analyzer Bool
 convert from to = if from == to 
@@ -182,9 +182,9 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
     applyByHeadList [] _ = Nothing
     applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyWithSimp x s e) <|> applyByHeadList xs e
     simplifyStep:: Fom -> Maybe Fom
-    simplifyStep e = applyByHeadList heads e where
+    simplifyStep e = applyByHeadList (traceShow heads heads) e where
         simpCompare (_, a) (_, b) = compare b a
-        heads = sortBy simpCompare $ lookupHeads e
+        heads = sortBy simpCompare $ nub $ lookupHeads e
 
 type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
 

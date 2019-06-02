@@ -58,11 +58,10 @@ buildFomEx opt exp = do
     normalizeAC fun@(FunFom ACFun _ _ [x]) = normalizeAC x
     normalizeAC fun@(FunFom AFun _ _ [x]) = normalizeAC x
     normalizeAC fun@FunFom{} = case funAttr fun of
-        AFun -> nAssoc
-        ACFun{} -> nAssoc
+        AFun -> nFun
+        ACFun{} -> nFun
         _ -> fun{funArgs=map normalizeAC args}
         where
-        nAssoc = if length args == length nArgs then fun else nFun
         args = funArgs fun
         nArgs = concatMap (extractArgs (idStr $ funName fun)) args
         nFun = fun{funArgs=map (normalizeAC . latestFom) nArgs}
