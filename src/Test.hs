@@ -12,7 +12,12 @@ import Data
 import Visualizer
 import Rewriter
 
-showMsgs msgs = intercalate "\n" $ map show msgs
+showMessage:: Message -> String
+showMessage (Message id msg) = showIdent id ++ ":" ++ msg where
+    showPos (Position line column) = show line ++ " " ++ show column
+    showIdent (Ident pos str) = "\"" ++ str ++ "\" (" ++ showPos pos ++ ")"
+
+showMsgs msgs = intercalate "\n" $ map showMessage msgs
 
 toTokens:: String -> [PosToken]
 toTokens str = toks where
@@ -78,7 +83,10 @@ testFunc2 = do
 
 testFunc = do
     file <- readFile "test.txt"
-    str <- getLine
-    putStrLn $ reasoningTest file str
+    putStrLn $ reasoningTest file ""
+    forever $ do
+        file <- readFile "test.txt"
+        str <- getLine
+        putStrLn $ reasoningTest file str
     return ()
     -- test $ reasoningTest file

@@ -65,13 +65,6 @@ axiom (A: Prop) {
 	A | A >>= A
 }
 
-theorem (x, y: N) {
-	x + 0 + 0 + 0 + y >>= x + 0 + y
-proof:
-	step x + y
-	step x + 0 + y + 0 + 0 * 1
-}
-
 theorem (A, B: Prop) {
 	(A => B) => (A | ~B)
 proof:

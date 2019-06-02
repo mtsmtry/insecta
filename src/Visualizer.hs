@@ -60,6 +60,7 @@ showFunFom omap fshow f args = if isAlpha (head f)
     bshow fom = fshow omap fom
 
 showFom:: OpeMap -> Fom -> String
+showFom omap (ACRestFom rest fun) = "{" ++ rest ++ "}" ++ idStr (funName fun) ++ showFom omap fun
 showFom omap (PredFom vl ty) = showFom omap vl ++ "." ++ showFom omap ty
 showFom omap UnknownFom = "unknown"
 showFom omap TypeOfType = "Type"

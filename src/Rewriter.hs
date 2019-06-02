@@ -40,24 +40,6 @@ instance Eq Fom where
     TypeOfType == TypeOfType = True
     _ == _ = False
 
-normalize:: Fom -> Fom
-normalize = normalizeEx const
-
-normalizeRewrite:: Fom -> Fom
-normalizeRewrite = normalizeEx $ Rewrite SortReason
-
-normalizeEx:: (Fom -> Fom -> Fom) -> Fom -> Fom
-normalizeEx rewrite fun@FunFom{} = case funAttr fun of
-    AFun -> nAssoc
-    ACFun{} -> nAssoc
-    _ -> fun{funArgs=map (normalizeEx rewrite) args}
-    where
-    nAssoc = if length args == length nArgs then fun else rewrite nFun fun
-    args = funArgs fun
-    nArgs = concatMap (extractArgs (idStr $ funName fun)) args
-    nFun = fun{funArgs=map (normalizeEx rewrite . latestFom) nArgs}
-normalizeEx _ fom = fom
-
 (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <||> b = \m-> a m <|> b m
 
@@ -102,6 +84,18 @@ unifyArgsOrder ptns args = if length ptns /= length args
     unifyArgs [] [] = Just
     unifyArgs _ _ = const Nothing
 
+unifyArgsRandom:: ([Fom] -> AssignMap -> Maybe AssignMap) -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
+unifyArgsRandom restInserter = unifyArgs where
+    unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
+    unifyArgs [] [] = Just
+    unifyArgs [] rests = restInserter rests
+    unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs
+    matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
+    matchForPtn ptn ptns noMatchTrgs [] = const Nothing
+    matchForPtn ptn ptns noMatchTrgs (trg:restTrgs) = main <||> rest where
+        main = unifyWithAsg ptn trg >=> unifyArgs ptns (noMatchTrgs ++ restTrgs)
+        rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
+
 unifyWithAsg:: Fom -> Fom -> AssignMap -> Maybe AssignMap
 unifyWithAsg Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
 unifyWithAsg ptn trg@Rewrite{} = unifyWithAsg ptn $ rewLater trg
@@ -113,22 +107,17 @@ unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl pt
 unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
     Just x -> if x == trg then Just m else Nothing
     Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
-unifyWithAsg ptn@FunFom{} trg@(FunFom OFun _ _ _) = unifyFun unifyArgsOrder ptn trg
-unifyWithAsg ptn@FunFom{} trg@(FunFom AFun _ _ _) = unifyFun unifyArgsOrder ptn trg
-unifyWithAsg ptn@FunFom{} trg@(FunFom CFun _ _ _) = unifyFun unifyArgs ptn trg where
-    unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs [a, b] [a', b'] = (unifyWithAsg a a' >=> unifyWithAsg b b') <||> (unifyWithAsg a b' >=> unifyWithAsg b a')
-unifyWithAsg ptn@FunFom{} trg@(FunFom (ACFun _) _ _ _) = unifyFun unifyArgs ptn trg where
-    unifyArgs:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    unifyArgs [] [] = Just
-    unifyArgs [] [rest] = Just . M.insert "_" rest
-    unifyArgs [] rests = Just . M.insert "_" trg{funArgs=rests}
-    unifyArgs (ptn:ptns) trgs = matchForPtn ptn ptns [] trgs
-    matchForPtn:: Fom -> [Fom] -> [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
-    matchForPtn ptn ptns noMatchTrgs [] = const Nothing
-    matchForPtn ptn ptns noMatchTrgs (trg:restTrgs) = main <||> rest where
-        main = unifyWithAsg ptn trg >=> unifyArgs ptns (noMatchTrgs ++ restTrgs)
-        rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
+unifyWithAsg ptn@FunFom{} trg@FunFom{} = case funAttr trg of
+    OFun -> unifyFun unifyArgsOrder ptn trg
+    CFun -> unifyFun unifyArgsComm ptn trg
+    AFun -> unifyFun unifyArgsOrder ptn trg
+    ACFun -> unifyFun (unifyArgsRandom $ const $ const Nothing) ptn trg
+    where
+    unifyArgsComm:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
+    unifyArgsComm [a, b] [a', b'] = (unifyWithAsg a a' >=> unifyWithAsg b b') <||> (unifyWithAsg a b' >=> unifyWithAsg b a')
+unifyWithAsg (ACRestFom restName ptn) trg@FunFom{} = unifyFun (unifyArgsRandom inserter) ptn trg where
+    inserter [rest] = Just . M.insert restName rest
+    inserter rests = Just . M.insert restName trg{funArgs=rests}
 unifyWithAsg _ _ = const Nothing
 
 unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
@@ -137,13 +126,13 @@ unifyList f (x:xs) trg = case unify (f x) trg of
     Nothing -> unifyList f xs trg
 
 assign:: AssignMap -> Fom -> Fom
-assign m fom@(VarFom id ty) = fromMaybe fom $ M.lookup (idStr id) m
-assign m fom@(FunFom (ACFun name) _ _ args@(x:xs)) = case M.lookup name m of
-    Just rest -> fom{funArgs=[main, rest]}
-    Nothing -> main
-    where
-    main = if null xs then assign m x else applyArgs (assign m) fom
+assign m var@(VarFom id ty) = fromMaybe var $ M.lookup (idStr id) m
+assign m fun@(FunFom ACFun _ _ _) = fun{funArgs=concatMap toArray args} where
+    args = map (assign m) $ funArgs fun
+    toArray arg@FunFom{} = if funName arg == funName fun then funArgs arg else [arg]
+    toArray arg = [arg]
 assign m fom@FunFom{} = applyArgs (assign m) fom
+assign m ACRestFom{} = error "assign m ACRestFom{}"
 assign m fom = fom
 
 insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
@@ -154,6 +143,7 @@ insertSimp id a b = case (funIdent a, funIdent b) of
     (Nothing, Nothing) -> analyzeError id "全ての定数は等しい簡略性を持つため、定数を両端に持つ命題は無効です"
     where
     funIdent:: Fom -> Maybe Ident
+    funIdent (ACRestFom _ fun) = funIdent fun
     funIdent fun@FunFom{} = Just $ funName fun
     funIdent _ = Nothing
     insertSimpByName:: String -> String -> Analyzer ()
@@ -189,7 +179,7 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
         new -> Just $ Rewrite res new old                      -- rewrite argument
     applyWithSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
         fsimp = fromMaybe (-1) $ elemIndex (idStr $ funName fun) simps
-        rest = normalizeRewrite <$> applyArgsOnce (applyWithSimp rules simp) fun
+        rest = applyArgsOnce (applyWithSimp rules simp) fun
         apply:: [Rule] -> Fom -> Maybe Fom
         apply (rule:rules) trg = case unify (ruleBf rule) trg of
             Just asg -> Just $ Rewrite (NormalReason rule asg) (assign asg (ruleAf rule)) trg
@@ -213,7 +203,7 @@ applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = if funName bg == funName g
         1 -> do
             let (xs', x:xs) = splitAt idx args
             res <- applyDiff derivater x
-            return $ normalizeRewrite . (\t-> bg{funArgs=map snd xs' ++ t:map snd xs}) <$> res
+            return $ (\t-> bg{funArgs=map snd xs' ++ t:map snd xs}) <$> res
         _ -> derivater pair
     else derivater pair where
         (as, bs) = (funArgs bg, funArgs gl)
@@ -285,7 +275,7 @@ derivateUnfold = applyDiff unfold where
             maybe (insertEnt False id ty) (const $ return ()) mEnt
         addEnt _ = return ()
     unfold _ = return Nothing
--- (A & B & A | B & A & B) => P & Q, (A & B | A & B) => P & Q
+
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
     mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom
@@ -299,8 +289,8 @@ mergeRewrite = mergeRewrite Nothing where
         else Nothing
     mergeRewrite _ a b = if a == b then Just a else Nothing
     appendStep:: Reason -> Fom -> Fom -> Fom
-    appendStep r' t (Rewrite r a b) = Rewrite r a (appendStep r' t b)
-    appendStep r t u = Rewrite r u t
+    appendStep juncRes trg (Rewrite r a b) = appendStep r (Rewrite juncRes a trg) b  -- Rewrite r b (appendStep juncRes trg a)
+    appendStep juncRes trg new = Rewrite juncRes new trg
     hasRewrite:: Fom -> Bool
     hasRewrite Rewrite{} = True
     hasRewrite fun@FunFom{} = all hasRewrite $ funArgs fun

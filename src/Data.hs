@@ -124,7 +124,7 @@ showExprIdent (StrExpr id) = id
 showExprIdent (NumExpr (IdentInt pos num)) = Ident pos (show num)
 
 -- Formula
-data FunAttr = OFun | CFun | AFun | ACFun String deriving (Eq, Show)
+data FunAttr = OFun | CFun | AFun | ACFun deriving (Eq, Show)
 
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
     | PredFom { predVl::Fom, predTy::Fom }
@@ -134,6 +134,7 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | StrFom Ident
     | NumFom IdentInt
     | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
+    | ACRestFom { acRest::String, acFun::Fom }
     | UnknownFom
     | TypeOfType deriving (Show)
 
@@ -157,6 +158,7 @@ showIdent (StrFom id) = id
 showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
 
 evalType:: Fom -> Fom
+evalType (ACRestFom _ fun) = evalType fun
 evalType TypeOfType = error "evalType TypeOfType"
 evalType Rewrite{} = error "evalType Rewrite{}"
 evalType fom@FunFom{} = funType fom

@@ -3,6 +3,7 @@ import Data.Char
 import Data.List
 import Data.Maybe
 import Data.Monoid
+import Debug.Trace
 import qualified Data.Map as M
 import Control.Monad
 import Control.Monad.Writer
@@ -50,8 +51,21 @@ buildFom = buildFomEx NotAllowUndefined
 buildFomEx:: BuildFomOption -> Expr -> Analyzer (Maybe Fom)
 buildFomEx opt exp = do
     fom <- buildFom exp
-    return $ normalize <$> fom
+    return $ normalizeAC <$> fom
     where
+    normalizeAC:: Fom -> Fom
+    normalizeAC fun@(FunFom ACFun _ _ [x]) = normalizeAC x
+    normalizeAC fun@(FunFom AFun _ _ [x]) = normalizeAC x
+    normalizeAC fun@FunFom{} = case funAttr fun of
+        AFun -> nAssoc
+        ACFun{} -> nAssoc
+        _ -> fun{funArgs=map normalizeAC args}
+        where
+        nAssoc = if length args == length nArgs then fun else nFun
+        args = funArgs fun
+        nArgs = concatMap (extractArgs (idStr $ funName fun)) args
+        nFun = fun{funArgs=map (normalizeAC . latestFom) nArgs}
+    normalizeAC fom = fom
     buildFom:: Expr -> Analyzer (Maybe Fom)
     buildFom (NumExpr num) = return $ Just $ NumFom num
     buildFom (StrExpr str) = return $ Just $ StrFom str
@@ -107,65 +121,76 @@ buildFomEx opt exp = do
                 return trg
         checkType _ _ = return Nothing
 
+makeVarEmergeMap:: Fom -> M.Map String Int
+makeVarEmergeMap fom = execState (makeVarEmergeMap fom) M.empty where
+    makeVarEmergeMap:: Fom -> State (M.Map String Int) ()
+    makeVarEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
+    makeVarEmergeMap fun@FunFom{} = mapM_ makeVarEmergeMap $ funArgs fun
+    makeVarEmergeMap fom = return ()
+forkList:: (a -> Bool) -> [a] -> ([a], [a]) -> ([a], [a])
+forkList f (x:xs) (as, bs) = if f x then (x:as, bs) else (as, x:bs)
+
 buildRule:: Expr -> Analyzer (Maybe Rule)
 buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     case kind of
         "=>"  -> checkType ImplRule "Prop" bfFom afFom
-        ">>=" -> sameType SimpRule $ normalizeRule (bfFom, boxACOneArg (bfFom, afFom))
-        "<=>" -> checkType EqualRule "Prop" bfFom $ boxACOneArg (bfFom, afFom)
-        "="   -> sameType EqualRule $ normalizeRule (bfFom, afFom)
+        "<=>" -> checkType EqualRule "Prop" bfFom afFom
+        ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType SimpRule
+        "="   -> normalizeACRule (bfFom, afFom) >>= sameType EqualRule
         _     -> analyzeErrorM rId "無効な命題です"
     where
     checkType:: RuleKind -> String -> Maybe Fom -> Maybe Fom -> Analyzer (Maybe Rule)
     checkType kind ty bf af = do
         chBf <- checkType bf
         chAf <- checkType af
-        return $ Rule kind rId Nothing <$> (getLabel =<< chBf) <*> chBf <*> chAf
+        label <- maybe (return Nothing) getLabel chBf
+        return $ Rule kind rId Nothing <$> label <*> chBf <*> chAf
         where
         checkType (Just fom) = if evalType fom == makeType ty 
             then return $ Just fom
             else analyzeErrorM (funName fom) "命題ではありません"
         checkType Nothing = return Nothing
-    getLabel:: Fom -> Maybe String
-    getLabel fun@FunFom{} = Just $ idStr $ funName fun
-    getLabel _ = Nothing
+    getLabel:: Fom -> Analyzer (Maybe String)
+    getLabel (ACRestFom _ fun) = getLabel fun
+    getLabel fun@FunFom{} = return $ Just $ idStr $ funName fun
+    getLabel fom = analyzeErrorM (showIdent fom) "左辺は関数は関数である必要があります"
     sameType:: RuleKind -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
     sameType kind (Just bf, Just af) = if evalType bf == evalType af
-        then return $ Rule kind rId Nothing <$> getLabel bf <*> Just bf <*> Just af
+        then do
+            label <- getLabel bf
+            return $ Rule kind rId Nothing <$> label <*> Just bf <*> Just af
         else analyzeErrorM rId "両辺の型が一致しません"
     sameType _ _ = return Nothing
 
-    normalizeRule:: (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom)
-    normalizeRule (Just a, Just b) = apply (Just . normalizeACRest lMap rMap) a b where 
-        apply f a b = (f a, f b)
-        lMap = makeVarEmergeMap a
-        rMap = makeVarEmergeMap b
-    normalizeRule rule = rule
-    makeVarEmergeMap:: Fom -> M.Map String Int
-    makeVarEmergeMap fom = execState (makeVarEmergeMap fom) M.empty where
-        makeVarEmergeMap:: Fom -> State (M.Map String Int) ()
-        makeVarEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
-        makeVarEmergeMap fun@FunFom{} = mapM_ makeVarEmergeMap $ funArgs fun
-        makeVarEmergeMap fom = return ()
-    normalizeACRest:: M.Map String Int -> M.Map String Int -> Fom -> Fom
-    normalizeACRest lMap rMap = removeRestVar where
-        removeRestVar:: Fom -> Fom
-        removeRestVar fun@(FunFom ACFun{} _ _ _) = fun{funArgs=mapMaybe (eraseRestVar . removeRestVar) (funArgs fun)}
-        removeRestVar fun@FunFom{} = fun{funArgs=map removeRestVar (funArgs fun)}
-        removeRestVar fom = fom
-        eraseRestVar:: Fom -> Maybe Fom
-        eraseRestVar var@(VarFom id _) = if count lMap == 1 && count rMap == 1 then Nothing else Just var
-            where count = fromMaybe 0 . M.lookup (idStr id)
-        eraseRestVar fom = Just fom
-    boxACOneArg:: (Maybe Fom, Maybe Fom) -> Maybe Fom
-    boxACOneArg (Just fun@(FunFom (ACFun _) (Ident _ name) _ _), Just fom) = 
-        Just $ if sameFun name fom then fom else fun{funArgs=[fom]} 
+    normalizeACRule:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
+    normalizeACRule (a, b) = do 
+        a' <- maybe (return Nothing) normalizeACACRest a
+        b' <- maybe (return Nothing) normalizeACACRest b
+        return $ boxACRest (a', b')
+    normalizeACACRest:: Fom -> Analyzer (Maybe Fom)
+    normalizeACACRest fun@(FunFom ACFun _ _ _) = do
+        let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap $ funArgs fun
+        args <- conjMaybe <$> mapM normalizeACACRest (funArgs fun)
+        case oneEmergeVars of
+            [] -> return $ (\x-> fun{funArgs=x}) <$> args
+            [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
+            _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
         where
-        sameFun name (FunFom (ACFun _) (Ident _ name') _ _) = name == name'
-        sameFun _ _ = False
-    boxACOneArg (_, fom) = fom
+        isVarWithName:: String -> Fom -> Bool
+        isVarWithName name var@VarFom{} = name == idStr (varName var)
+        isVarWithName _ _ = False
+        varEmergeMap:: [Fom] -> M.Map String Int
+        varEmergeMap foms = execState (mapM_ varEmergeMap foms) M.empty where
+            varEmergeMap:: Fom -> State (M.Map String Int) ()
+            varEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
+            varEmergeMap fom = return ()
+    normalizeACACRest fom = return $ Just fom
+    boxACRest:: (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom)
+    boxACRest (Just fun@(FunFom ACFun id ty _), Just af) =
+        (Just $ ACRestFom "_" fun, Just fun{funArgs=[VarFom (Ident NonePosition "_") ty, af]})
+    boxACRest pair = pair
 
 returnMessage:: a -> Message -> Analyzer a
 returnMessage a m = Analyzer ([m], , a)
@@ -181,16 +206,8 @@ insertRule rule = case ruleKind rule of
         | isCommutativeRule rule -> updateFunAttr (ruleLabel rule) enableCommu
         | otherwise -> analyzeError (ruleIdent rule) "交換律でも結合律でもありません"
         where
-        enableAssoc:: FunAttr -> FunAttr
-        enableAssoc attr@ACFun{} = attr
-        enableAssoc CFun = ACFun "_"
-        enableAssoc OFun = AFun
-        enableAssoc AFun = AFun
-        enableCommu:: FunAttr -> FunAttr
-        enableCommu attr@ACFun{} = attr
-        enableCommu CFun = CFun
-        enableCommu OFun = CFun
-        enableCommu AFun = ACFun "_"
+        enableAssoc = \case attr@ACFun{}-> attr; CFun-> ACFun; OFun-> AFun; AFun-> AFun
+        enableCommu = \case attr@ACFun{}-> attr; CFun-> CFun; OFun-> CFun; AFun-> ACFun
 
 buildCmd:: IdentWith Command -> Analyzer Command
 buildCmd (id, StepCmd) = return StepCmd
