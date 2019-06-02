@@ -136,18 +136,29 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     case kind of
-        "=>"  -> normalizeACRule (bfFom, afFom) >>= checkType ImplRule "Prop"
-        "<=>" -> checkType EqualRule "Prop" (bfFom, afFom)
-        ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType SimpRule
-        "="   -> normalizeACRule (bfFom, afFom) >>= sameType EqualRule
+        "=>"  -> normalizeACRule (bfFom, afFom) >>= checkType ImplRule "Prop" (bfFom, afFom)
+        "<=>" -> checkType EqualRule "Prop" (bfFom, afFom) (bfFom, afFom)
+        ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType SimpRule (bfFom, afFom)
+        "="   -> normalizeACRule (bfFom, afFom) >>= sameType EqualRule (bfFom, afFom)
         _     -> analyzeErrorM rId "無効な命題です"
     where
-    checkType:: RuleKind -> String -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
-    checkType kind ty (bf, af) = do
-        chBf <- checkType bf
-        chAf <- checkType af
-        label <- maybe (return Nothing) getLabel chBf
-        return $ Rule kind rId Nothing <$> label <*> chBf <*> chAf
+    checkType:: RuleKind -> String -> (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
+    checkType kind ty (Just bf, Just af) (rBf, rAf) = do
+        chBf <- checkType rBf
+        chAf <- checkType rAf
+        mLabel <- maybe (return Nothing) getLabel chBf
+        return $ do
+            rAf <- chBf
+            rBf <- chAf
+            label <- mLabel
+            return Rule{ 
+                ruleKind=kind, 
+                ruleIdent=rId, 
+                ruleProof=Nothing, 
+                ruleLabel=label, 
+                ruleBf=rBf, 
+                ruleAf=rAf, 
+                ruleProp=makeProp kind bf af } 
         where
         checkType (Just fom) = if evalType fom == makeType ty 
             then return $ Just fom
@@ -157,14 +168,26 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     getLabel (ACRestFom _ fun) = getLabel fun
     getLabel fun@FunFom{} = return $ Just $ idStr $ funName fun
     getLabel fom = analyzeErrorM (showIdent fom) "左辺は関数値である必要があります"
-    sameType:: RuleKind -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
-    sameType kind (Just bf, Just af) = if evalType bf == evalType af
+    sameType:: RuleKind -> (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
+    sameType kind (Just bf, Just af) (Just rBf, Just rAf) = if evalType bf == evalType af
         then do
-            label <- getLabel bf
-            return $ Rule kind rId Nothing <$> label <*> Just bf <*> Just af
+            mLabel <- getLabel bf
+            return $ do
+                label <- mLabel
+                return Rule{ 
+                    ruleKind=kind, 
+                    ruleIdent=rId, 
+                    ruleProof=Nothing, 
+                    ruleLabel=label, 
+                    ruleBf=rBf, 
+                    ruleAf=rAf, 
+                    ruleProp=makeProp kind bf af } 
         else analyzeErrorM rId "両辺の型が一致しません"
-    sameType _ _ = return Nothing
+    sameType _ _ _ = return Nothing
 
+    makeProp:: RuleKind -> Fom -> Fom -> Fom
+    makeProp ImplRule a b = makeBinary "=>" a b
+    makeProp _ a b = makeBinary (if evalType a == makeType "Prop" then "<=>" else "=") a b
     normalizeACRule:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
     normalizeACRule (a, b) = do 
         a' <- maybe (return Nothing) normalizeACRest a
@@ -176,8 +199,8 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
         args <- conjMaybe <$> mapM normalizeACRest (funArgs fun)
         case oneEmergeVars of
             [] -> return $ (\x-> fun{funArgs=x}) <$> args
-            var:_ -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
-            -- _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
+            [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
+            _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
         where
         isVarWithName:: String -> Fom -> Bool
         isVarWithName name var@VarFom{} = name == idStr (varName var)
@@ -347,11 +370,9 @@ buildProofProcess trg WrongRewrite = return (WrongProcess, UnknownFom)
 buildProof:: Strategy -> Maybe Rule -> Analyzer Proof
 buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
     nOrg <- case (mRule, stOrg) of
-        (Just rule, StrategyOriginAuto) -> return $ StrategyOriginFom $ ruleBf rule
-        (Just rule, StrategyOriginLeft) -> return $ StrategyOriginFom $ ruleBf rule
-        (Just rule, StrategyOriginWhole) -> case ruleKind rule of
-            SimpRule -> return $ StrategyOriginFom $ makeBinary "=" (ruleBf rule) (ruleAf rule)
-            ImplRule -> return $ StrategyOriginFom $ makeBinary "=>" (ruleBf rule) (ruleAf rule)
+        (Just rule, StrategyOriginAuto) -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
+        (Just rule, StrategyOriginLeft) -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
+        (Just rule, StrategyOriginWhole) -> return $ StrategyOriginFom $ ruleProp rule
         (Nothing, StrategyOriginLeft) -> buildError "ルートスコープ以外では使用できません"
         (Nothing, StrategyOriginWhole) -> buildError "ルートスコープ以外では使用できません"
         (Nothing, StrategyOriginAuto) -> buildError "証明の対象が宣言されていません"

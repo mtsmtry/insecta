@@ -200,7 +200,14 @@ applyArgsOnce apply fun@FunFom{} = do
 -- Rewriting
 data RuleKind = SimpRule | ImplRule | EqualRule deriving (Eq, Show)
 data PredRule = PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
-data Rule = Rule{ ruleKind::RuleKind, ruleIdent::Ident, ruleProof::Maybe Proof, ruleLabel::String, ruleBf::Fom, ruleAf::Fom } deriving (Show)
+data Rule = Rule{ 
+    ruleKind::RuleKind,
+    ruleIdent::Ident,
+    ruleProof::Maybe Proof,
+    ruleLabel::String,
+    ruleBf::Fom,
+    ruleAf::Fom,
+    ruleProp::Fom } deriving (Show)
 type AssignMap = M.Map String Fom
 type RuleMap = M.Map String [Rule]
 type PredRuleMap = M.Map String (M.Map String [PredRule])
