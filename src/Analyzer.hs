@@ -4,6 +4,7 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import Debug.Trace
+import qualified Data.Foldable as F
 import qualified Data.Map as M
 import Control.Monad
 import Control.Monad.Writer
@@ -71,11 +72,11 @@ buildFomEx opt exp = do
     buildFom (StrExpr str) = return $ Just $ StrFom str
 
     buildFom (IdentExpr id) = do
-        mEnt <- lookupEnt $ idStr id
+        mEnt <- lookupEntWithArea $ idStr id
         case mEnt of
-            Just ent -> if entConst ent
-                then return $ Just $ CstFom id (entType ent)
-                else return $ Just $ VarFom id (entType ent)
+            Just (ent, area) -> case area of
+                Global -> return $ Just $ CstFom id (entType ent)
+                Local -> return $ Just $ VarFom id (entType ent)
             Nothing -> if opt == AllowUndefined
                 then return $ Just $ VarFom id UnknownFom
                 else analyzeErrorM id "宣言されていない識別子です"
@@ -116,7 +117,7 @@ buildFomEx opt exp = do
                 vStr <- onOpeMap showFom vl
                 eStr <- onOpeMap showFom vlTy
                 aStr <- onOpeMap showFom ty
-                let msg = "'" ++ vStr ++ "'は'" ++ aStr ++ "'型である必要がありますが、実際は '" ++ eStr ++ "'型です"
+                let msg = "'" ++ vStr ++ "'は'" ++ aStr ++ "'型である必要がありますが、実際は'" ++ eStr ++ "'型です"
                 analyzeError (showIdent vl) msg
                 return trg
         checkType _ _ = return Nothing
@@ -135,14 +136,14 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     case kind of
-        "=>"  -> checkType ImplRule "Prop" bfFom afFom
-        "<=>" -> checkType EqualRule "Prop" bfFom afFom
+        "=>"  -> normalizeACRule (bfFom, afFom) >>= checkType ImplRule "Prop"
+        "<=>" -> checkType EqualRule "Prop" (bfFom, afFom)
         ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType SimpRule
         "="   -> normalizeACRule (bfFom, afFom) >>= sameType EqualRule
         _     -> analyzeErrorM rId "無効な命題です"
     where
-    checkType:: RuleKind -> String -> Maybe Fom -> Maybe Fom -> Analyzer (Maybe Rule)
-    checkType kind ty bf af = do
+    checkType:: RuleKind -> String -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
+    checkType kind ty (bf, af) = do
         chBf <- checkType bf
         chAf <- checkType af
         label <- maybe (return Nothing) getLabel chBf
@@ -167,16 +168,16 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     normalizeACRule:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
     normalizeACRule (a, b) = do 
         a' <- maybe (return Nothing) normalizeACRest a
-        b' <- maybe (return Nothing) normalizeACRest b
-        return $ boxACRest (a', b')
+        -- b' <- maybe (return Nothing) normalizeACRest b
+        return $ boxACRest (a', b)
     normalizeACRest:: Fom -> Analyzer (Maybe Fom)
     normalizeACRest fun@(FunFom ACFun _ _ _) = do
         let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap $ funArgs fun
         args <- conjMaybe <$> mapM normalizeACRest (funArgs fun)
         case oneEmergeVars of
             [] -> return $ (\x-> fun{funArgs=x}) <$> args
-            [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
-            _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
+            var:_ -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
+            -- _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
         where
         isVarWithName:: String -> Fom -> Bool
         isVarWithName name var@VarFom{} = name == idStr (varName var)
@@ -245,15 +246,13 @@ buildStrategyRewrite (id, ForkStm list) = do
 
 buildStrategyRewrite (id, ForAllStm var ty) = do
     mFom <- buildFom ty
-    case mFom of
-        Just fom -> updateVar $ M.insert (idStr var) $ Variable ForAll fom
-        Nothing -> return ()
+    F.forM_ mFom (insertEnt var)
     return Nothing
 
 buildStrategyRewrite (id, ExistsStm var refs ty) = do
     mFom <- buildFom ty
     case mFom of
-        Just fom -> updateVar $ M.insert (idStr var) $ Variable (Exists refs) fom
+        Just fom -> insertEntMap var fom $ \ent-> ent{entQtf=Exists refs}
         Nothing -> return ()
     return Nothing
 
@@ -372,27 +371,19 @@ buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
 
 loadProof:: Rule -> [IdentWith Statement] -> Analyzer Proof
 loadProof rule stms = do
-    updateVar $ const M.empty
     stg <- buildStrategy stms
     buildProof stg $ Just rule
-
-subScope:: Analyzer a -> Analyzer a
-subScope subRountine = do
-    emap <- fmap conEnt getContext
-    res  <- subRountine
-    updateEnt $ const emap
-    return res
 
 loadVarDec:: (Ident, Expr) -> Analyzer ()
 loadVarDec (id, exp) = do
     mFom <- buildFom exp
-    maybe (return ()) (insertEnt False id) mFom
+    maybe (return ()) (insertEnt id) mFom
 
 loadVarDecs:: [[(Ident, Expr)]] -> Analyzer ()
 loadVarDecs = mapM_ (mapM_ loadVarDec)
 
 loadDecla:: Decla -> Analyzer ()
-loadDecla (Theorem decs prop stms) = do
+loadDecla (TheoremDecla decs prop stms) = do
     (prf, mRule) <- subScope $ do
         loadVarDecs decs
         mRule <- buildRule prop
@@ -400,42 +391,44 @@ loadDecla (Theorem decs prop stms) = do
         return (prf, mRule)
     maybe (return ()) (\rule-> insertRule rule{ruleProof=prf}) mRule
 
-loadDecla (Axiom decs prop) = do
+loadDecla (AxiomDecla decs prop) = do
     mRule <- subScope $ do
         loadVarDecs decs
         buildRule prop
     maybe (return ()) insertRule mRule
 
-loadDecla (Undef id ty mTex) = do
-    mTy <- buildFom ty
-    maybe (return ()) (\ty-> insertEntWithLatex True id ty mTex) mTy
+loadDecla (UndefDecla id ty mTex) = do
+    mTy <- subScope $ buildFom ty
+    maybe (return ()) (\ty-> insertEntMap id ty $ \ent-> ent{entLatex=mTex}) mTy
     
-loadDecla (Define id decs ret def) = do
-    (mArgTys, mRetTy, mDef) <- subScope $ do
+loadDecla (DefineDecla id decs ret def) = do
+    (mArgTys, mRetTy, mDef, scope) <- subScope $ do
         loadVarDecs decs
         mArgTys <- mapM (buildFom . snd) (last decs)
         mRetTy <- buildFom ret
         mDef <- buildFom def
-        return (mArgTys, mRetTy, mDef)
+        scope <- getLocalEntMap
+        return (mArgTys, mRetTy, mDef, scope)
     case (conjMaybe mArgTys, mRetTy, mDef) of
-        (Just argTys, Just retTy, Just def) -> do
+        (Just argTys, Just retTy, Just body) -> do
+            let def = Define { defScope=scope, defBody=body, defArgs=map (idStr . fst) $ last decs} 
             let ty = FunTypeFom { funTypeIdent = id, funArgTypes = argTys, funRetType = retTy }
-            insertEntWithDef True id ty def
+            insertEntMap id ty $ \ent-> ent{entDef=Just def}
         _ -> return ()
 
-loadDecla (DataType id def) = do
-    insertEnt True id TypeOfType
+loadDecla (DataTypeDecla id def) = do
+    insertEnt id TypeOfType
     mapM_ insertCstr $ extractArgs "|" def
     where
     tyFom = makeType (idStr id)
     insertCstr:: Expr -> Analyzer ()
-    insertCstr (IdentExpr id) = insertEnt True id tyFom
+    insertCstr (IdentExpr id) = insertEnt id tyFom
     insertCstr (FunExpr id args) = do
         mArgs <- mapM buildFom args
         mapM_ checkType mArgs
         (flip $ maybe $ return ()) (conjMaybe mArgs) $ \args-> do
             let ty = FunTypeFom { funTypeIdent=id, funArgTypes=args, funRetType=tyFom }
-            insertEnt True id ty
+            insertEnt id ty
         where
         checkType:: Maybe Fom -> Analyzer ()
         checkType (Just fom) = when (evalType fom /= TypeOfType) (analyzeError id "型ではありません")

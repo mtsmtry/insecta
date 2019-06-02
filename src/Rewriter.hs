@@ -22,24 +22,16 @@ instance Eq Fom where
         sameAttr:: Bool
         sameAttr = funName a == funName b && funType a == funType b
         equalACFun:: Fom -> Fom -> Bool
-        equalACFun a b = equalArgSet (funArgs a) (funArgs b) where
-        equalArgSet:: [Fom] -> [Fom] -> Bool
-        equalArgSet xs ys = length xs == length ys && equalArgSet xs ys where
-            equalArgSet:: [Fom] -> [Fom] -> Bool
-            equalArgSet [] [] = True
-            equalArgSet (x:xs) ys = maybe False (equalArgSet xs) $ equalRest x ys []
-        equalRest:: Fom -> [Fom] -> [Fom] -> Maybe [Fom]
-        equalRest x [] _ = Nothing
-        equalRest x (y:ys) rest = if x == y then Just $ ys ++ rest else equalRest x ys (y:rest)
+        equalACFun a b = equalAsSet (funArgs a) (funArgs b) where
     (PredFom vl ty) == (PredFom vl' ty') = vl == vl' && ty == ty'
     (FunTypeFom id args ret) == (FunTypeFom id' args' ret') = id == id' && args == args' && ret == ret'
     (CstFom a x) == (CstFom b y) = a == b && x == y
     (VarFom a x) == (VarFom b y) = a == b && x == y
     (StrFom a) == (StrFom b) = a == b
     (NumFom a) == (NumFom b) = a == b
-    UnknownFom == UnknownFom = True
     TypeOfType == TypeOfType = True
-    _ == _ = False
+    UnknownFom == UnknownFom = True
+    a == b = False
 
 (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <||> b = \m-> a m <|> b m
@@ -61,7 +53,7 @@ convert from to = if from == to
     cast:: Fom -> Entity -> Entity -> Analyzer Bool
     cast trg from@PredEntity{} to@Entity{} = return $ predExtend from == trg
     cast trg from@Entity{} to@PredEntity{} = do
-        rules <- lookupPredRules (predName to) (idStr $ showIdent trg)
+        rules <- lookupPredRules (idStr $ predName to) (idStr $ showIdent trg)
         case unifyList predRuleTrg rules trg of
             Just (asg, rule) -> return True
             Nothing -> return False
@@ -241,23 +233,6 @@ derivate = applyDiff derivateByRuleList where
             Nothing -> return Nothing
     derivateByRuleList _ = return Nothing
 
-derivateExists:: Derivater
-derivateExists = applyDiff derivateExists where
-    contains:: Eq a => [a] -> [a] -> Bool
-    contains [] _ = True
-    contains (x:xs) set = x `elem` set && contains xs set
-    derivateExists:: Derivater
-    derivateExists (fom, var@(VarFom id varTy)) = do
-        vmap <- fmap conVar getContext 
-        case M.lookup (idStr id) vmap of
-            (Just (Variable (Exists refs) ty)) -> if ty == varTy && contains ids refs 
-                then return $ Just var
-                else return Nothing
-            _ -> return $ if fom == var then Just var else Nothing
-        where
-        ids = lookupVars fom
-    derivateExists (_, goal) = return $ Just goal
-
 derivateUnfold:: Derivater
 derivateUnfold = applyDiff unfold where
     getMaybe (Just (Just x)) = Just x
@@ -265,19 +240,42 @@ derivateUnfold = applyDiff unfold where
     unfold:: Derivater
     unfold (bg@FunFom{}, gl) = do
         mEnt <- lookupEnt (idStr $ funName bg)
-        case mEnt of
-            Just ent -> do
-                let asg = unify <$> entDef ent <*> Just gl
-                maybe (return Nothing) (insertEntFromAsg ent) (getMaybe asg)
+        case (mEnt, entDef <$> mEnt) of
+            (Just ent, Just (Just def)) -> do
+                let argAsg = M.fromList $ zip (defArgs def) (funArgs bg)
+                checkUnfold (defScope def) argAsg (defBody def) gl
+            _ -> return Nothing
         where
-        insertEntFromAsg:: Entity -> AssignMap -> Analyzer (Maybe Fom)
-        insertEntFromAsg ent asg = do
-            mapM_ addEnt (M.toList asg)
-            return $ Just $ Rewrite (UnfoldReason ent asg) gl bg
-        addEnt (str, VarFom id ty) = do
-            mEnt <- lookupEnt (idStr id)
-            maybe (insertEnt False id ty) (const $ return ()) mEnt
-        addEnt _ = return ()
+        checkUnfold:: EntityMap -> AssignMap -> Fom -> Fom -> Analyzer (Maybe Fom)
+        checkUnfold defMap argMag = checkUnfold where
+            checkUnfold:: Fom -> Fom -> Analyzer (Maybe Fom)
+            checkUnfold (VarFom (Ident _ name) ty) gl =
+                case (M.lookup name defMap, M.lookup name argMag) of
+                    (Just defEnt, _) -> do
+                        mEnt <- lookupEnt name
+                        case mEnt of
+                            Just ent -> return $ if entQtf ent == entQtf defEnt then Just gl else Nothing
+                            Nothing -> insertNewVarDec (entType defEnt) (entQtf defEnt) gl
+                    (_, Just arg) -> return $ if arg == gl then Just gl else Nothing
+                    (_, _) -> return Nothing
+            checkUnfold def@FunFom{} gl@FunFom{} = if funName def == funName gl 
+                then do
+                    mArgs <- mapM (uncurry checkUnfold) (zip (funArgs def) (funArgs gl))
+                    return $ (\x-> gl{funArgs=x}) <$> (conjMaybe $ mArgs)
+                else return Nothing
+            checkUnfold def gl = if def == gl then return $ Just gl else return Nothing
+            insertNewVarDec:: Fom -> Quantifier -> Fom -> Analyzer (Maybe Fom)
+            insertNewVarDec ty ForAll (VarFom id _) = do
+                insertEnt id ty
+                return $ Just $ VarFom id ty
+            -- insertNewVarDec ty ForAll fun@FunFom{} = do
+            --     mapM (insertNewVarDec ty ForAll)
+            --     fun{funArgs=funArgs fun}
+            insertNewVarDec ty ForAll fom = return $ Just fom
+            insertNewVarDec ty qtf@Exists{} var@(VarFom id _) = do
+                insertEntMap id ty $ \ent-> ent{entQtf=qtf}
+                return $ Just $ VarFom id ty
+            insertNewVarDec _ _ _ = return Nothing
     unfold _ = return Nothing
 
 mergeRewrite:: Fom -> Fom -> Maybe Fom

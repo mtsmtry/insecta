@@ -9,6 +9,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
+import Library
 
 -- Lexer Monad
 newtype Lexer a = Lexer { runLexer::(Position, String) -> ([Message], Position, String, a) }
@@ -214,20 +215,21 @@ insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
     updateList list = Just $ maybe [rule] (rule:) list
 
 -- Program
-data Decla = Axiom [VarDec] Expr 
-    | Theorem [VarDec] Expr [IdentWith Statement]
-    | Define Ident [VarDec] Expr Expr
-    | Predicate Ident Ident Expr [VarDec] Expr
-    | DataType Ident Expr 
-    | Undef Ident Expr (Maybe EmbString)
+data Decla = AxiomDecla [VarDec] Expr 
+    | TheoremDecla [VarDec] Expr [IdentWith Statement]
+    | DefineDecla Ident [VarDec] Expr Expr
+    | PredicateDecla Ident Ident Expr [VarDec] Expr
+    | DataTypeDecla Ident Expr 
+    | UndefDecla Ident Expr (Maybe EmbString)
     | InfixDecla Bool Int Int Ident deriving (Show)
 
 type VarDec = [(Ident, Expr)]
 data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
 
-data Entity = Entity { entName::String, entType::Fom, entConst::Bool, entLatex::Maybe EmbString, entFunAttr::FunAttr, entDef::Maybe Fom }
-    | PredEntity { predSelf::String, predExtend::Fom, predDef::Fom, predName::String }  deriving (Show)
-    
+data Define = Define { defScope::EntityMap, defBody::Fom, defArgs::[String] } deriving (Show)
+data Entity = Entity { entName::Ident, entType::Fom, entLatex::Maybe EmbString, entFunAttr::FunAttr, entDef::Maybe Define, entQtf::Quantifier }
+    | PredEntity { predSelf::Ident, predExtend::Fom, predDef::Fom, predName::Ident } deriving (Show)
+
 type IdentWith a = (Ident, a)
 
 data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
@@ -249,41 +251,44 @@ data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Pro
 data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginFom Fom | ProofOriginLeft Fom | ProofOriginWrong deriving (Show)
 data Proof = Proof { prfOrigin::ProofOrigin, prfProcesses::[ProofProcess], prfBegin::Fom, prfEnd::Fom } deriving (Show)
 
-data Quantifier = ForAll | Exists [Ident] deriving (Show)
-data Variable = Variable Quantifier Fom deriving (Show)
-type VarMap = M.Map String Variable
-
 -- Context
 type Simplicity = [String] -- functions ordered by simplicity
+data Quantifier = ForAll | Exists [Ident] deriving (Show)
+
+instance Eq Quantifier where
+    ForAll == ForAll = True
+    (Exists as) == (Exists bs) = equalAsSet as bs
+    _ == _ = False
+
 type EntityMap = M.Map String Entity
 type LatexMap = M.Map String Fom
 
-data Context = Context { 
-    conVar::VarMap,
+data Context = Context {
     conOpe::OpeMap,
     conList::Simplicity,
     conSimp::RuleMap, 
     conImpl::RuleMap,
-    conEnt::EntityMap,
+    conEnt::[EntityMap],
     conPred::PredRuleMap }
+
+makeEntity:: Ident -> Fom -> Entity
+makeEntity id ty = Entity { entName=id, entType=ty, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing, entQtf=ForAll }
 
 newContext:: OpeMap -> Context
 newContext omap = Context {
-        conVar=M.empty,
         conOpe=omap,
         conList=[],
         conSimp=M.empty, 
         conImpl=M.empty,
-        conEnt=buildInScope,
+        conEnt=[buildInScope],
         conPred=M.empty }
     where
-    buildInEnt name = Entity { entName=name, entType=TypeOfType, entConst=True, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing }
+    buildInEnt name = makeEntity (Ident NonePosition name) TypeOfType
     buildInTypes = ["Prop", "Char", "Type"]
     buildInScope = M.fromList $ map (\name-> (name, buildInEnt name)) buildInTypes
 
 -- Context Accesser
 updateContext selector f = Analyzer $ ([], , ()) . f
-updateVar f = Analyzer $ \ctx-> ([], ctx{conVar=f $ conVar ctx}, ())
 updateList f = Analyzer $ \ctx-> ([], ctx{conList=f $ conList ctx}, ())
 updateSimp f = Analyzer $ \ctx-> ([], ctx{conSimp=f $ conSimp ctx}, ())
 updateImpl f = Analyzer $ \ctx-> ([], ctx{conImpl=f $ conImpl ctx}, ())
@@ -297,6 +302,9 @@ onContext selector f trg = do
 getContext:: Analyzer Context
 getContext = Analyzer $ \ctx -> ([], ctx, ctx)
 
+getLocalEntMap:: Analyzer EntityMap
+getLocalEntMap = Analyzer $ \ctx -> ([], ctx, head $ conEnt ctx)
+
 onOpeMap:: (OpeMap -> b -> a) -> b -> Analyzer a
 onOpeMap = onContext conOpe
 
@@ -308,24 +316,37 @@ analyzeError:: Ident -> String -> Analyzer ()
 analyzeError ps str = Analyzer ([Message ps str], , ())
 
 updateFunAttr:: String -> (FunAttr -> FunAttr) -> Analyzer ()
-updateFunAttr name f = updateEnt $ M.adjust (\ent-> ent{entFunAttr=f $ entFunAttr ent}) name
-    
-insertEnt:: Bool -> Ident -> Fom -> Analyzer ()
-insertEnt const id ty = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing })
+updateFunAttr name f = updateEnt $ map $ M.adjust (\ent-> ent{entFunAttr=f $ entFunAttr ent}) name
 
-insertEntWithDef:: Bool -> Ident -> Fom -> Fom -> Analyzer ()
-insertEntWithDef const id ty def = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=Nothing, entFunAttr=OFun, entDef=Just def })
+insertEntMap:: Ident -> Fom -> (Entity -> Entity) -> Analyzer ()
+insertEntMap id ty f = updateEnt $ mapHead $ M.insert (idStr id) $ f $ makeEntity id ty where
+    mapHead f (x:xs) = f x:xs
+    mapHead f [] = []
 
-insertEntWithLatex:: Bool -> Ident -> Fom -> Maybe EmbString -> Analyzer ()
-insertEntWithLatex const id ty latex = updateEnt $ M.insert (idStr id) 
-    (Entity { entName=show id, entType=ty, entConst=const, entLatex=latex, entFunAttr=OFun, entDef=Nothing })
+insertEnt:: Ident -> Fom -> Analyzer ()
+insertEnt name ty = insertEntMap name ty id
 
-lookupEnt:: String -> Analyzer (Maybe Entity)
+subScope:: Analyzer a -> Analyzer a
+subScope subRountine = do
+    updateEnt (M.empty:)
+    res <- subRountine
+    updateEnt tail
+    return res
+
+data DeclaArea = Local | Global
+lookupEntWithArea:: String -> Analyzer (Maybe (Entity, DeclaArea))
+lookupEntWithArea str = do
+    (local:global) <- fmap conEnt getContext
+    case M.lookup str local of
+        Just ent -> return $ Just (ent, Local)
+        Nothing -> case mapMaybe (M.lookup str) global of
+            (x:xs) -> return $ Just (x, Global)
+            _ -> return Nothing
+
+lookupEnt:: String -> Analyzer (Maybe Entity)   
 lookupEnt str = do
-    emap <- fmap conEnt getContext
-    return $ M.lookup str emap
+    res <- lookupEntWithArea str
+    return $ fst <$> res
 
 lookupPredRules:: String -> String -> Analyzer [PredRule]
 lookupPredRules pred trg = do

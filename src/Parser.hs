@@ -244,28 +244,28 @@ parseLatex:: Parser (Maybe EmbString)
 parseLatex = return (Just id) <::> parseToken (IdentToken "latex") <++> parseEmbString
 
 parseDeclaBody:: OpeMap -> String -> Parser (Maybe Decla)
-parseDeclaBody omap "axiom" = return (Just Axiom)
+parseDeclaBody omap "axiom" = return (Just AxiomDecla)
     <++> parseParenVarDecsSet omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "theorem" = return (Just Theorem)
+parseDeclaBody omap "theorem" = return (Just TheoremDecla)
     <++> parseParenVarDecsSet omap
     <::> parseSymbol "{" 
     <++> parseExpr omap
     <::> parseToken (IdentToken "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap
     <::> parseSymbol "}"
-parseDeclaBody omap "def" = return (Just Define)
+parseDeclaBody omap "def" = return (Just DefineDecla)
     <++> parseIdent
     <++> parseParenVarDecsSet omap
     <::> parseSymbol ":" <++> parseExpr omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "predicate" = return (Just Predicate)
+parseDeclaBody omap "predicate" = return (Just PredicateDecla)
     <++> parseIdent
     <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap<::> parseSymbol "]"
     <++> parseParenVarDecsSet omap
     <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "data" = return (Just DataType)
+parseDeclaBody omap "data" = return (Just DataTypeDecla)
     <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
-parseDeclaBody omap "undef" = return (Just Undef)
+parseDeclaBody omap "undef" = return (Just UndefDecla)
     <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex
 parseDeclaBody omap "infixl" = return (Just (InfixDecla True 2))
     <++> parseNumber <++> parseAnyOperator
