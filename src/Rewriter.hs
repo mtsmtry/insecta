@@ -3,6 +3,7 @@ import Data.Char
 import Data.List
 import Data.Maybe
 import Data.Monoid
+import Debug.Trace
 import qualified Data.Map as M
 import Control.Monad
 import Control.Monad.Writer
@@ -288,16 +289,33 @@ mergeRewrite = mergeRewrite Nothing where
     mergeRewrite _ former latter@(Rewrite r a b) = mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
     mergeRewrite _ former@(Rewrite r a b) latter = mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
     mergeRewrite _ funA@FunFom{} funB@FunFom{} = if funName funA == funName funB
-        then (\x-> funA{funArgs=x}) <$> conjMaybe (zipWith (mergeRewrite Nothing) (funArgs funA) (funArgs funB))
+        then do
+            let zipFunc = if funAttr funA == ACFun then zipRandomFom else \x y-> Just $ zip x y
+            argPairs <- zipFunc (funArgs funA) (funArgs funB)
+            let merges = map (uncurry $ mergeRewrite Nothing) argPairs
+            conjMerge <- conjMaybe merges
+            return funA{funArgs=conjMerge}
         else Nothing
     mergeRewrite _ a b = if a == b then Just a else Nothing
     appendStep:: Reason -> Fom -> Fom -> Fom
-    appendStep juncRes trg (Rewrite r a b) = appendStep r (Rewrite juncRes a trg) b  -- Rewrite r b (appendStep juncRes trg a)
+    appendStep juncRes trg (Rewrite r a b) = appendStep r (Rewrite juncRes a trg) b
     appendStep juncRes trg new = Rewrite juncRes new trg
     hasRewrite:: Fom -> Bool
     hasRewrite Rewrite{} = True
     hasRewrite fun@FunFom{} = all hasRewrite $ funArgs fun
     hasRewrite _ = False
+    zipRandomFom:: [Fom] -> [Fom] -> Maybe [(Fom, Fom)]
+    zipRandomFom = zipRandom (\x y-> latestFom x == latestFom y)
+    zipRandom:: (a -> a -> Bool) -> [a] -> [a] -> Maybe [(a, a)]
+    zipRandom equals as bs = if length as == length bs then zipRandom as bs else Nothing where
+    --  zipRandom:: [a] -> [a] -> Maybe [(a, a)]
+        zipRandom [] [] = Just []
+        zipRandom (a:as) bs = case splitEq a bs of 
+            Just (x, xs) -> ((a, x):) <$> zipRandom as xs
+            Nothing -> Nothing
+    --  splitEq:: a -> [a] -> Maybe (a, [a])
+        splitEq it [] = Nothing
+        splitEq it (x:xs) = if equals it x then Just (x, xs) else (fmap (x:)) <$> splitEq it xs
 
 lookupVars:: Fom -> [Ident]
 lookupVars fun@FunFom{} = concatMap lookupVars $ funArgs fun

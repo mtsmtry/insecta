@@ -174,11 +174,13 @@ makeType str = CstFom{cstName=Ident NonePosition str, cstType=TypeOfType}
 propType = makeType "Prop"
 
 latestFom:: Fom -> Fom
-latestFom fom@Rewrite{} = latestFom $ rewLater fom
-latestFom fom = fom 
+latestFom rew@Rewrite{} = latestFom $ rewLater rew
+latestFom fun@FunFom{} = applyArgs latestFom fun
+latestFom fom = fom
 
 oldestFom:: Fom -> Fom
-oldestFom fom@Rewrite{} = oldestFom $ rewOlder fom
+oldestFom rew@Rewrite{} = oldestFom $ rewOlder rew
+oldestFom fun@FunFom{} = applyArgs oldestFom fun
 oldestFom fom = fom
 
 applyArgs:: (Fom -> Fom) -> Fom -> Fom
