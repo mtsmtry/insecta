@@ -116,7 +116,7 @@ buildFomEx opt exp = do
                 vStr <- onOpeMap showFom vl
                 eStr <- onOpeMap showFom vlTy
                 aStr <- onOpeMap showFom ty
-                let msg = "'" ++ vStr ++ "'は" ++ eStr ++ "'型であると予期しましたが、実際は '" ++ aStr ++ "'型でした"
+                let msg = "'" ++ vStr ++ "'は'" ++ aStr ++ "'型である必要がありますが、実際は '" ++ eStr ++ "'型です"
                 analyzeError (showIdent vl) msg
                 return trg
         checkType _ _ = return Nothing
@@ -155,7 +155,7 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     getLabel:: Fom -> Analyzer (Maybe String)
     getLabel (ACRestFom _ fun) = getLabel fun
     getLabel fun@FunFom{} = return $ Just $ idStr $ funName fun
-    getLabel fom = analyzeErrorM (showIdent fom) "左辺は関数は関数である必要があります"
+    getLabel fom = analyzeErrorM (showIdent fom) "左辺は関数値である必要があります"
     sameType:: RuleKind -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
     sameType kind (Just bf, Just af) = if evalType bf == evalType af
         then do

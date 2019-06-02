@@ -200,14 +200,18 @@ applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = if funName bg == funName g
     then case num of
         0 -> return Nothing
         1 -> do
-            let (xs', x:xs) = splitAt idx args
+            let (xs', x:xs) = splitAt idx argPairs
             res <- applyDiff derivater x
             return $ (\t-> bg{funArgs=map snd xs' ++ t:map snd xs}) <$> res
-        _ -> derivater pair
+        _ -> do
+            let eqDerivate pair@(a, b) = if a == b then return $ Just b else derivater pair
+            res <- derivater pair
+            argsRes <- conjMaybe <$> mapM eqDerivate argPairs
+            return $ (\x-> bg{funArgs=x}) <$> argsRes <|> res
     else derivater pair where
         (as, bs) = (funArgs bg, funArgs gl)
-        args = zip as bs
-        matchArgs = fmap (uncurry (==)) args
+        argPairs = zip as bs
+        matchArgs = fmap (uncurry (==)) argPairs
         (idx, num) = encount False matchArgs
         -- (element, list) -> (index of the first encountered element, number of encounters)
         encount:: Eq a => a -> [a] -> (Int, Int)
