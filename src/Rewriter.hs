@@ -125,7 +125,16 @@ assign m fun@(FunFom ACFun _ _ _) = case concatMap toArray args of [x]-> x; xs->
     toArray arg = [arg]
 assign m fom@FunFom{} = applyArgs (assign m) fom
 assign m ACRestFom{} = error "assign m ACRestFom{}"
+assign m (ACEachFom name fun lambda) = case M.lookup name m of 
+    Just list -> fun{funArgs=map (applyUnaryLambda lambda m) $ toList list}
+    Nothing -> error "not found"
+    where
+    toList trg@FunFom{} = if funName fun == funName trg then funArgs trg else [trg]
+    toList trg = [trg]
 assign m fom = fom
+
+applyUnaryLambda:: UnaryLambda -> AssignMap -> Fom -> Fom
+applyUnaryLambda (UnaryLambda arg body) m value = assign (M.insert arg value m) body
 
 insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
 insertSimp id a b = case (funIdent a, funIdent b) of

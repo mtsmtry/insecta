@@ -43,7 +43,7 @@ reasoning:: String -> Analyzer String
 reasoning str = do
     omap <- fmap conOpe getContext
     let exps = if null str then [] else parseExprs omap str
-    foms <- mapM (buildFomEx AllowUndefined) exps
+    foms <- subScope $ mapM (buildFomEx AllowUndefined) exps
     case foms of
         [Just fom] -> simplifyTest omap fom
         [Just a, Just b] -> do

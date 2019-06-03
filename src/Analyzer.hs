@@ -17,9 +17,10 @@ import Rewriter
 import Data
 import Visualizer
 
-onRule:: (Fom -> Fom -> Bool) -> Rule -> Bool
+onRule:: (Fom -> Fom -> a) -> Rule -> a
 onRule f rule = f (ruleBf rule) (ruleAf rule)
 
+-- f(a, b) = f(b, a)
 isCommutativeRule:: Rule -> Bool
 isCommutativeRule = onRule isCommutative where
     isCommutative:: Fom -> Fom -> Bool
@@ -28,6 +29,7 @@ isCommutativeRule = onRule isCommutative where
         _ -> False
     isCommutative _ _ = False
 
+-- f(a, f(b, c)) = f(f(a, b), c)
 isAssociativeRule:: Rule -> Bool
 isAssociativeRule = onRule isAssociative where
     isAssociative:: Fom -> Fom -> Bool
@@ -43,6 +45,22 @@ isAssociativeRule = onRule isAssociative where
         sameName:: [Fom] -> Bool
         sameName (x:xs) = let name = funName x in all (\t-> name == funName t) xs
     isAssociative _ _ = False
+
+-- f(g(a, b)) = g(f(a), f(b))
+isDistributive:: Fom -> Fom -> Maybe (Fom, UnaryLambda)
+isDistributive bf af@(FunFom ACFun id _ [lf, rg]) = case diffVarList lf rg of
+    Just [(a, b)] -> if bf == expectBf then Just (af, lambda) else Nothing where 
+        expectBf = applyUnaryLambda lambda M.empty af{funArgs=[a, b]}
+        lambda = UnaryLambda (idStr $ varName a) lf
+    Nothing -> Nothing
+    where
+    diffVarList:: Fom -> Fom -> Maybe [(Fom, Fom)]
+    diffVarList lf@VarFom{} rg@VarFom{} = if lf == rg then Just [] else Just [(lf, rg)]
+    diffVarList lf@FunFom{} rg@FunFom{} = if funName lf == funName rg
+        then concat <$> conjMaybe (zipWith diffVarList (funArgs lf) (funArgs rg))
+        else Nothing
+    diffVarList lf rg = if lf == rg then Just [] else Nothing
+isDistributive _ _ = Nothing
 
 data BuildFomOption = AllowUndefined | NotAllowUndefined deriving(Eq, Show)
 
@@ -135,63 +153,55 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     case kind of
-        "=>"  -> normalizeACRule (bfFom, afFom) >>= checkType ImplRule "Prop" (bfFom, afFom)
-        "<=>" -> checkType EqualRule "Prop" (bfFom, afFom) (bfFom, afFom)
-        ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType SimpRule (bfFom, afFom)
-        "="   -> normalizeACRule (bfFom, afFom) >>= sameType EqualRule (bfFom, afFom)
+        "=>"  -> normalizeACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule ImplRule (bfFom, afFom)
+        "<=>" -> normalizeACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule EqualRule (bfFom, afFom)
+        ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType >>= makeRule SimpRule (bfFom, afFom)
+        "="   -> normalizeACRule (bfFom, afFom) >>= sameType >>= makeRule EqualRule (bfFom, afFom)
         _     -> analyzeErrorM rId "無効な命題です"
     where
-    checkType:: RuleKind -> String -> (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
-    checkType kind ty (Just bf, Just af) (rBf, rAf) = do
-        chBf <- checkType rBf
-        chAf <- checkType rAf
-        mLabel <- maybe (return Nothing) getLabel chBf
-        return $ do
-            rAf <- chBf
-            rBf <- chAf
-            label <- mLabel
-            return Rule{ 
-                ruleKind=kind, 
-                ruleIdent=rId, 
-                ruleProof=Nothing, 
-                ruleLabel=label, 
-                ruleBf=rBf, 
-                ruleAf=rAf, 
-                ruleProp=makeProp kind bf af } 
+    makeRule:: RuleKind -> (Maybe Fom, Maybe Fom) -> Maybe (Fom, Fom) -> Analyzer (Maybe Rule)
+    makeRule kind (Just bf, Just af) (Just (rBf, rAf))= do
+        mLabel <- getLabel bf
+        return $ mLabel >>= \label-> Just Rule{ 
+            ruleKind=kind, ruleIdent=rId, ruleProof=Nothing, ruleLabel=label, ruleBf=rBf, ruleAf=rAf, 
+            ruleProp=makeProp kind bf af } 
+        where
+        makeProp:: RuleKind -> Fom -> Fom -> Fom
+        makeProp ImplRule a b = makeBinary "=>" a b
+        makeProp _ a b = makeBinary (if evalType a == makeType "Prop" then "<=>" else "=") a b
+        getLabel:: Fom -> Analyzer (Maybe String)
+        getLabel fun@FunFom{} = return $ Just $ idStr $ showIdent bf
+        getLabel fom = analyzeErrorM (showIdent fom) "左辺は関数値である必要があります"
+    makeRule _ _ _ = return Nothing
+
+    checkType:: String -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe (Fom, Fom))
+    checkType ty (bf, af) = do
+        chBf <- checkType bf
+        chAf <- checkType af
+        return $ case (chBf, chAf) of (Just af, Just bf)-> Just (af, bf); _-> Nothing
         where
         checkType (Just fom) = if evalType fom == makeType ty 
             then return $ Just fom
             else analyzeErrorM (funName fom) "命題ではありません"
         checkType Nothing = return Nothing
-    getLabel:: Fom -> Analyzer (Maybe String)
-    getLabel (ACRestFom _ fun) = getLabel fun
-    getLabel fun@FunFom{} = return $ Just $ idStr $ funName fun
-    getLabel fom = analyzeErrorM (showIdent fom) "左辺は関数値である必要があります"
-    sameType:: RuleKind -> (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
-    sameType kind (Just bf, Just af) (Just rBf, Just rAf) = if evalType bf == evalType af
-        then do
-            mLabel <- getLabel bf
-            return $ do
-                label <- mLabel
-                return Rule{ 
-                    ruleKind=kind, 
-                    ruleIdent=rId, 
-                    ruleProof=Nothing, 
-                    ruleLabel=label, 
-                    ruleBf=rBf, 
-                    ruleAf=rAf, 
-                    ruleProp=makeProp kind bf af } 
-        else analyzeErrorM rId "両辺の型が一致しません"
-    sameType _ _ _ = return Nothing
 
-    makeProp:: RuleKind -> Fom -> Fom -> Fom
-    makeProp ImplRule a b = makeBinary "=>" a b
-    makeProp _ a b = makeBinary (if evalType a == makeType "Prop" then "<=>" else "=") a b
+    sameType:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe (Fom, Fom))
+    sameType (Just bf, Just af) = if evalType bf == evalType af
+        then return $ Just (bf, af)
+        else analyzeErrorM rId "両辺の型が一致しません"
+    sameType _ = return Nothing
+
     normalizeACRule:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
-    normalizeACRule (a, b) = do 
-        a' <- maybe (return Nothing) normalizeACRest a
-        -- b' <- maybe (return Nothing) normalizeACRest b
-        return $ boxACRest (a', b)
+    normalizeACRule (Just a, Just b) = case isDistributive a b of
+        Just (acFun, lambda) -> do
+            let rBf = applyUnaryLambda lambda M.empty $ ACRestFom "_" b{funArgs=[]}
+            let rAf = ACEachFom "_" acFun lambda
+            return (Just rBf, Just rAf)
+        Nothing -> do
+            nomA <- normalizeACRest a
+            return $ boxACRest (nomA, Just b)
+    normalizeACRule pair = return pair
+
     normalizeACRest:: Fom -> Analyzer (Maybe Fom)
     normalizeACRest fun@(FunFom ACFun _ _ _) = do
         let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap $ funArgs fun
@@ -210,6 +220,7 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
             varEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
             varEmergeMap fom = return ()
     normalizeACRest fom = return $ Just fom
+
     boxACRest:: (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom)
     boxACRest (Just fun@(FunFom ACFun id ty _), Just af) =
         (Just $ ACRestFom "_" fun, Just fun{funArgs=[VarFom (Ident NonePosition "_") ty, af]})
@@ -369,12 +380,12 @@ buildProofProcess trg WrongRewrite = return (WrongProcess, UnknownFom)
 buildProof:: Strategy -> Maybe Rule -> Analyzer Proof
 buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
     nOrg <- case (mRule, stOrg) of
-        (Just rule, StrategyOriginAuto) -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
-        (Just rule, StrategyOriginLeft) -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
+        (Just rule, StrategyOriginAuto)  -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
+        (Just rule, StrategyOriginLeft)  -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
         (Just rule, StrategyOriginWhole) -> return $ StrategyOriginFom $ ruleProp rule
-        (Nothing, StrategyOriginLeft) -> buildError "ルートスコープ以外では使用できません"
+        (Nothing, StrategyOriginLeft)  -> buildError "ルートスコープ以外では使用できません"
         (Nothing, StrategyOriginWhole) -> buildError "ルートスコープ以外では使用できません"
-        (Nothing, StrategyOriginAuto) -> buildError "証明の対象が宣言されていません"
+        (Nothing, StrategyOriginAuto)  -> buildError "証明の対象が宣言されていません"
         (_, org) -> return org
     (org, begin) <- buildProofOrigin nOrg
     (list, end) <- buildProofProcessList begin rews

@@ -125,6 +125,8 @@ showExprIdent (StrExpr id) = id
 showExprIdent (NumExpr (IdentInt pos num)) = Ident pos (show num)
 
 -- Formula
+data UnaryLambda = UnaryLambda { unaryLambdaArg::String, unaryLambdaBody::Fom } deriving (Show)
+
 data FunAttr = OFun | CFun | AFun | ACFun deriving (Eq, Show)
 
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
@@ -132,10 +134,12 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] } 
     | CstFom { cstName::Ident, cstType::Fom }
     | VarFom { varName::Ident, varType::Fom }
+    | LambdaFom { lambdaType::Fom, lambdaArgs::[String], lambdaBody::Fom }
     | StrFom Ident
     | NumFom IdentInt
     | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
     | ACRestFom { acRest::String, acFun::Fom }
+    | ACEachFom { acEachList::String, acEachFun::Fom, acEachLambda::UnaryLambda }
     | UnknownFom
     | TypeOfType deriving (Show)
 
@@ -159,6 +163,7 @@ showIdent (StrFom id) = id
 showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
 
 evalType:: Fom -> Fom
+evalType (ACEachFom _ fun _) = evalType fun
 evalType (ACRestFom _ fun) = evalType fun
 evalType TypeOfType = error "evalType TypeOfType"
 evalType Rewrite{} = error "evalType Rewrite{}"

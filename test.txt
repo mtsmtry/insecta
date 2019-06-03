@@ -63,11 +63,13 @@ axiom (A, B: Prop) { A & B => A }
 
 axiom (A, B, C: Prop) 	{ (A | B) & C >>= A & C | B & C }
 
-def operator => (A, B: Prop): Prop { ~A | B }
+axiom (A: Prop) { A | A >>= A }
 
-axiom (A: Prop) {
-	A | A >>= A
+axiom (A, B, C: Prop) {
+	(A | B) & C >>= A & C | B & C
 }
+
+def operator => (A, B: Prop): Prop { ~A | B }
 
 theorem (A, B: Prop) {
 	(A => B) => (~A | B)
