@@ -33,6 +33,23 @@ instance Eq Fom where
     UnknownFom == UnknownFom = True
     a == b = False
 
+normalizeACRewrite:: Fom -> Fom
+normalizeACRewrite rew@(Rewrite res trg old) = case normalizeACRewrite trg of
+    (Rewrite newRes new _)-> Rewrite newRes new rew
+    new -> Rewrite res new old
+normalizeACRewrite fun@FunFom{} = if length (filter ((>1) . length) mArgs) >= 1 
+    then Rewrite ACNormalizeReason fun{funArgs=concat mArgs} fun
+    else fun{funArgs=nArgs}
+    where 
+    nArgs = map normalizeACRewrite $ funArgs fun
+    mArgs = map applyArg nArgs
+    applyArg:: Fom -> [Fom]
+    applyArg rew@Rewrite{} = case latestFom rew of
+        rewFun@FunFom{} -> if funName fun == funName rewFun then funArgs rewFun else [rewFun]
+        latest -> [latest]
+    applyArg arg = [arg]
+normalizeACRewrite fom = fom
+
 (<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
 a <||> b = \m-> a m <|> b m
 
@@ -166,7 +183,7 @@ simplify fom = do
     return $ simplifyStepLoop list simp fom
 
 simplifyStepLoop:: Simplicity -> RuleMap -> Fom -> Fom
-simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplifyStep _fom where
+simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplifyStepAndNom _fom where
     lookupHeads:: Fom -> [(String, Int)]
     lookupHeads rew@Rewrite{} = lookupHeads $ rewLater rew
     lookupHeads fun@FunFom{} = maybe rest (:rest) head where
@@ -194,6 +211,8 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
     simplifyStep e = applyByHeadList (traceShow heads heads) e where
         simpCompare (_, a) (_, b) = compare b a
         heads = sortBy simpCompare $ nub $ lookupHeads e
+    simplifyStepAndNom:: Fom -> Maybe Fom
+    simplifyStepAndNom x = simplifyStep x >>= Just . normalizeACRewrite
 
 type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
 
@@ -314,15 +333,15 @@ mergeRewrite = mergeRewrite Nothing where
     zipRandomFom:: [Fom] -> [Fom] -> Maybe [(Fom, Fom)]
     zipRandomFom = zipRandom (\x y-> latestFom x == latestFom y)
     zipRandom:: (a -> a -> Bool) -> [a] -> [a] -> Maybe [(a, a)]
-    zipRandom equals as bs = if length as == length bs then zipRandom as bs else Nothing where
-    --  zipRandom:: [a] -> [a] -> Maybe [(a, a)]
-        zipRandom [] [] = Just []
-        zipRandom (a:as) bs = case splitEq a bs of 
-            Just (x, xs) -> ((a, x):) <$> zipRandom as xs
+    zipRandom equals as bs = if length as == length bs then zipRandom equals as bs else Nothing where
+        zipRandom:: (a -> a -> Bool) -> [a] -> [a] -> Maybe [(a, a)]
+        zipRandom f [] [] = Just []
+        zipRandom f (a:as) bs = case splitWith f a bs of 
+            Just (x, xs) -> ((a, x):) <$> zipRandom f as xs
             Nothing -> Nothing
-    --  splitEq:: a -> [a] -> Maybe (a, [a])
-        splitEq it [] = Nothing
-        splitEq it (x:xs) = if equals it x then Just (x, xs) else (fmap (x:)) <$> splitEq it xs
+        splitWith:: (a -> a -> Bool) -> a -> [a] -> Maybe (a, [a])
+        splitWith f it [] = Nothing
+        splitWith f it (x:xs) = if f it x then Just (x, xs) else (fmap (x:)) <$> splitWith f it xs
 
 lookupVars:: Fom -> [Ident]
 lookupVars fun@FunFom{} = concatMap lookupVars $ funArgs fun

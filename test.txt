@@ -59,8 +59,12 @@ axiom (A: Prop) { A | A >>= A }
 axiom (A: Prop) { A & True >>= A }
 axiom (A: Prop) { A & A >>= A }
 
+axiom (A, B: Prop) { ~(A & B) >>= ~A & ~B }
+axiom (A, B: Prop) { ~(A | B) >>= ~A | ~B }
+
 axiom (A, B: Prop) { A & B => A }
 
+axiom (a, b, c: N) { (a + b) * c >>= a * c + b * c }
 axiom (A, B, C: Prop) 	{ (A | B) & C >>= A & C | B & C }
 
 axiom (A: Prop) { A | A >>= A }
@@ -89,5 +93,5 @@ proof:
 	step ((A | B) & (A & B)) => P & Q
 	step (A & B & A | B & A & B) => P & Q
 	step (A & B | A & B) => P & Q
-	step (A & B) => (P & Q)
+	step (A & B) => P & Q
 }

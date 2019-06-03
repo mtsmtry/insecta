@@ -146,7 +146,7 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
 data Reason = NormalReason Rule AssignMap 
     | UnfoldReason Entity AssignMap
     | EqualReason 
-    | SortReason deriving (Show)
+    | ACNormalizeReason deriving (Show)
 
 instance Eq Reason where
     a == b = False
