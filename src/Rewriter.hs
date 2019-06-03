@@ -105,6 +105,11 @@ unifyArgsRandom restInserter = unifyArgs where
         main = unifyWithAsg ptn trg >=> unifyArgs ptns (noMatchTrgs ++ restTrgs)
         rest = matchForPtn ptn ptns (noMatchTrgs ++ [trg]) restTrgs
 
+checkInsert:: String -> Fom -> AssignMap -> Maybe AssignMap
+checkInsert name fom = \m-> case M.lookup name m of
+    Just x -> if x == fom then Just m else Nothing
+    Nothing -> Just $ M.insert name fom m
+
 unifyWithAsg:: Fom -> Fom -> AssignMap -> Maybe AssignMap
 unifyWithAsg Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
 unifyWithAsg ptn trg@Rewrite{} = unifyWithAsg ptn $ rewLater trg
@@ -113,9 +118,7 @@ unifyWithAsg ptn@(CstFom id ty) trg@(CstFom id' ty') = if id == id' then unifyWi
 unifyWithAsg ptn@NumFom{} trg = if ptn == trg then Just else const Nothing
 unifyWithAsg ptn@StrFom{} trg = if ptn == trg then Just else const Nothing
 unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl ptnVl >=> unifyWithAsg trgTy ptnTy
-unifyWithAsg ptn@(VarFom id ty) trg = \m-> case M.lookup (idStr id) m of
-    Just x -> if x == trg then Just m else Nothing
-    Nothing -> Just $ M.insert (idStr id) (latestFom trg) m
+unifyWithAsg ptn@(VarFom id ty) trg = checkInsert (idStr id) (latestFom trg) 
 unifyWithAsg ptn@FunFom{} trg@FunFom{} = case funAttr trg of
     OFun -> unifyFun unifyArgsOrder ptn trg
     CFun -> unifyFun unifyArgsComm ptn trg
@@ -125,8 +128,8 @@ unifyWithAsg ptn@FunFom{} trg@FunFom{} = case funAttr trg of
     unifyArgsComm:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgsComm [a, b] [a', b'] = (unifyWithAsg a a' >=> unifyWithAsg b b') <||> (unifyWithAsg a b' >=> unifyWithAsg b a')
 unifyWithAsg (ACRestFom restName ptn) trg@FunFom{} = unifyFun (unifyArgsRandom inserter) ptn trg where
-    inserter [rest] = Just . M.insert restName rest
-    inserter rests = Just . M.insert restName trg{funArgs=rests}
+    inserter [rest] = checkInsert restName rest
+    inserter rests = checkInsert restName trg{funArgs=rests} 
 unifyWithAsg _ _ = const Nothing
 
 unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)

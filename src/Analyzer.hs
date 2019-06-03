@@ -196,30 +196,38 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
         Just (acFun, lambda) -> do
             let rBf = applyUnaryLambda lambda M.empty $ ACRestFom "_" b{funArgs=[]}
             let rAf = ACEachFom "_" acFun lambda
-            return (Just rBf, Just rAf)
+            rBf' <- normalizeACRest rBf
+            return (rBf', Just rAf)
         Nothing -> do
             nomA <- normalizeACRest a
             return $ boxACRest (nomA, Just b)
     normalizeACRule pair = return pair
 
     normalizeACRest:: Fom -> Analyzer (Maybe Fom)
-    normalizeACRest fun@(FunFom ACFun _ _ _) = do
-        let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap $ funArgs fun
-        args <- conjMaybe <$> mapM normalizeACRest (funArgs fun)
-        case oneEmergeVars of
-            [] -> return $ (\x-> fun{funArgs=x}) <$> args
-            [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
-            _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
-        where
+    normalizeACRest trg = normalizeACRest (makeVarEmergeMap trg) trg where
+        normalizeACRest:: M.Map String Int -> Fom -> Analyzer (Maybe Fom)
+        normalizeACRest m (ACRestFom rest fun) = do
+            nFun <- normalizeACRest m fun
+            return $ ACRestFom rest <$> nFun
+        normalizeACRest m fun@(FunFom ACFun _ _ _) = do
+            let varFilter = \case (VarFom id _)-> Just $ idStr id; _-> Nothing
+            let varList = mapMaybe (varFilter >=> \name-> M.lookup name m >>= Just . (name, )) $ funArgs fun
+            let oneEmergeVars = map fst $ filter ((==1) . snd) varList
+            args <- conjMaybe <$> mapM (normalizeACRest m) (funArgs fun)
+            case oneEmergeVars of
+                [] -> return $ (\x-> fun{funArgs=x}) <$> args
+                [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
+                _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
+        normalizeACRest _ fom = return $ Just fom
+        makeVarEmergeMap:: Fom -> M.Map String Int
+        makeVarEmergeMap fom = execState (makeVarEmergeMap fom) M.empty where
+            makeVarEmergeMap:: Fom -> State (M.Map String Int) ()
+            makeVarEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
+            makeVarEmergeMap fun@FunFom{} = mapM_ makeVarEmergeMap $ funArgs fun
+            makeVarEmergeMap fom = return ()
         isVarWithName:: String -> Fom -> Bool
         isVarWithName name var@VarFom{} = name == idStr (varName var)
         isVarWithName _ _ = False
-        varEmergeMap:: [Fom] -> M.Map String Int
-        varEmergeMap foms = execState (mapM_ varEmergeMap foms) M.empty where
-            varEmergeMap:: Fom -> State (M.Map String Int) ()
-            varEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
-            varEmergeMap fom = return ()
-    normalizeACRest fom = return $ Just fom
 
     boxACRest:: (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom)
     boxACRest (Just fun@(FunFom ACFun id ty _), Just af) =
