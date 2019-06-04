@@ -13,6 +13,23 @@ import Control.Applicative
 import Library
 import Data
 
+class ToJson a where
+    toJson:: a -> Analyzer String
+
+infixl 0 .=
+(.=):: k -> v -> (k, v)
+key .= value = (key, value)
+
+toJsonMap:: ToJson v => M.Map String v -> Analyzer String
+toJsonMap = object . (map (fmap toJson)) . M.toList
+
+object:: [(String, Analyzer String)] -> Analyzer String
+object pairs = do
+    values <- sequence (map snd pairs)
+    let quote v = if head v == '{' && last v == '}' then v else "\"" ++ v ++ "\""
+    let body = zipWith (\k v-> "\"" ++ k ++ "\":" ++ quote v) (map fst pairs) values
+    return $ "{" ++ intercalate "," body ++ "}"
+        
 data RewriteList = RewriteFom Fom | RewriteList Reason Fom RewriteList
 
 showRule:: OpeMap -> Rule -> String
@@ -46,14 +63,17 @@ showRewriteList omap (RewriteList r e rest) = showOldestFom omap e
                                             ++ " [" ++ showReason omap r ++ "]" ++ "\n"
                                             ++ showRewriteList omap rest
 
+showRewrites:: OpeMap -> Fom -> String
+showRewrites omap fom = showRewriteList omap (toRewriteList omap fom)
+
 showFunFom:: OpeMap -> (OpeMap -> Fom -> String) -> String -> [Fom]-> String
 showFunFom omap fshow "tuple" as = "(" ++ intercalate ", " (map (fshow omap) as) ++ ")"
 showFunFom omap fshow f args = if isAlpha (head f) 
     then f ++ "(" ++ intercalate ", " (map (fshow omap) args) ++ ")"
     else if getArgNum f == 1 then f ++ fshow omap (head args) else intercalate f (map (fshow omap) args)
     where
-    getArgNum h = maybe 2 (\(x, _, _)-> x) $ M.lookup h omap
-    getPre h = maybe 100 (\(_, x, _)-> x) $ M.lookup h omap
+    getArgNum h = maybe 2 opeArgNum $ M.lookup h omap
+    getPre h = maybe 100 opePreceed $ M.lookup h omap
     bshow fun@FunFom{} = let g = idStr $ funName fun in if length (show g) == 2 && getPre f > getPre (show g) 
         then "(" ++ fshow omap fun ++ ")" 
         else fshow omap fun
@@ -112,3 +132,69 @@ showContext con = showMapList (showEntity omap) (concatMap M.toList $ conEnt con
     ++ showMapList (intercalate "\n" . map (showRule omap)) (M.toList $ conSimp con)
     ++ showMapList (intercalate "\n" . map (showRule omap)) (M.toList $ conImpl con)
     ++ show (conList con) where omap = conOpe con
+
+showEmb:: EmbString -> [String] -> String
+showEmb [EmbStr str] args = intercalate (str ++ " ") args
+showEmb parts args = concatMap showPart parts where
+    showPart:: EmbPart -> String
+    showPart (EmbVar var) = args !! var
+    showPart (EmbStr str) = str ++ " "
+
+showLatex:: Fom -> Analyzer String
+showLatex fom = fmap fst (showLatex fom) where
+    showLatex:: Fom -> Analyzer (String, Operator)
+    showLatex fun@FunFom{} = do
+        omap <- fmap conOpe getContext
+        let name = idStr $ funName fun
+        let hostOpe = fromMaybe defaultOpe $ M.lookup name omap
+        let bracket (str, ope) = if opePreceed hostOpe <= opePreceed ope then str else "\\left(" ++ str ++ "\\right)"
+        mEnt <- lookupEnt name
+        args <- mapM showLatex $ funArgs fun
+        return $ (, hostOpe) $ case mEnt >>= entLatex of
+            Nothing
+                | isAlpha (head name)    -> name ++ "\\left(" ++ intercalate "," (map fst args) ++ "\\right)"
+                | opeArgNum hostOpe == 1 -> name ++ bracket (head args)
+                | otherwise              -> intercalate name $ map bracket args
+            Just emb -> showEmb emb $ map bracket args
+    showLatex fom = do
+        omap <- fmap conOpe getContext
+        return (showFom omap fom, Operator 2 100 True)
+
+toJsonList:: [String] -> String
+toJsonList xs = "[" ++ intercalate "," xs ++ "]"
+
+instance ToJson Reason where
+    toJson (NormalReason rule asg) = object [ "kind".= return "normal", "rule".= toJson rule, "asg".= toJsonMap asg ]
+    toJson (UnfoldReason ent asg) = object [ "kind".= return "unfold", "asg".= toJsonMap asg ]
+    toJson EqualReason = object [ "kind".= return "equal" ]
+    toJson ACNormalizeReason = object [ "kind".= return "acnom" ]
+
+instance ToJson Fom where
+    toJson fom = object [
+        "body".= showPart fom,
+        "vars".= toJsonMap (varMap fom M.empty)]
+        where
+        varMap:: Fom -> AssignMap -> AssignMap
+        varMap (VarFom id ty) = M.insert (idStr id) ty
+        varMap fun@FunFom{} = mapF varMap (funArgs fun)where 
+        varMap _ = id
+        showPart:: Fom -> Analyzer String
+        showPart (Rewrite res bf af) = object [
+            "kind".= return "rewrite",
+            "reason".= toJson res,
+            "before".= showPart bf,
+            "after".= showPart af]
+        showPart fom = object [
+            "kind".= return "normal",
+            "tex".= showLatex fom]
+
+instance ToJson Rule where
+    toJson rule = object [
+        "kind".= return (showRuleKind $ ruleKind rule),
+        "label".= return (ruleLabel rule),
+        "before".= toJson (ruleBf rule),
+        "after".= toJson (ruleAf rule),
+        "prop".= toJson (ruleProp rule)]
+        where
+        showRuleKind:: RuleKind -> String
+        showRuleKind = \case SimpRule-> "simp"; ImplRule-> "impl"; EqualRule-> "equal"

@@ -1,19 +1,13 @@
 module Main where
-import AWSLambda
-import AWSLambda.Events.APIGateway
-import Control.Lens
-import Data.Aeson
-import Data.Aeson.Embedded
 import Test
+import Control.Monad
+import qualified Handler as H
 
-main :: IO ()
-main = do 
-  testFunc
-  main
--- main = apiGatewayMain handler
-
-handler :: APIGatewayProxyRequest (Embedded Value) -> IO (APIGatewayProxyResponse (Embedded [String]))
-handler request = do
-  putStrLn "This should go to logs"
-  print $ request ^. requestBody
-  pure $ responseOK & responseBodyEmbedded ?~ [show request]
+main = H.main
+main2 = testFunc
+main3 = do
+    forever $ do
+        file <- readFile "test.txt"
+        str <- getLine
+        putStrLn $ H.mainFunc file str
+    return ()

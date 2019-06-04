@@ -19,6 +19,12 @@ dependencies:
 - serverless-haskell
 - aeson
 - lens
+- text
+- utf8-string
+- bytestring
+- hashmap
+- unordered-containers
+default-extensions: LambdaCase, TupleSections
 name: lightmath
 version: 0.1.0.0
 extra-source-files:
@@ -27,7 +33,6 @@ extra-source-files:
 author: Author name here
 github: githubuser/lightmath
 license: BSD3
-default-extensions: LambdaCase, TupleSections
 executables:
   lightmath-exe:
     source-dirs: app
@@ -37,5 +42,6 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
+    - text
     - lightmath
 description: Please see the README on GitHub at <https://github.com/githubuser/lightmath#readme>

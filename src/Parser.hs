@@ -86,7 +86,7 @@ parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
             incrementArg = apply (isIdent . fst) (fmap (1+))
             (opes, rest) = incrementArg <$> span ((not <$> isParenOpen) . fst) s
         OperatorToken ope -> parseExpr xs ((px, narg):rest) $ makeExpr opes q where
-            (msg, (narg, preceed, lassoc)) = getOpe $ Ident pos ope
+            (msg, Operator narg preceed lassoc) = getOpe $ Ident pos ope
             (opes, rest) = span (precederEq (preceed, lassoc) . fst) s
         SymbolToken{}   -> result
         where
@@ -103,15 +103,13 @@ parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
     -- apply 'f' to a element that satisfy 'cond' for the first time
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
-    -- String -> (preceed, left associative)
-    defaultOpe = (-1, 2, True)
-    getOpe:: Ident -> ([Message], (Int, Int, Bool))
+    getOpe:: Ident -> ([Message], Operator)
     getOpe x@(Ident pos id) = maybe ([Message x "Not defined infix"], defaultOpe) ([], ) (M.lookup id omap)
     precederEq:: (Int, Bool) -> PosToken -> Bool
     precederEq _ (PosToken _ ParenOpen) = False
     precederEq _ (PosToken _ (IdentToken _)) = True
     precederEq (apre, aleft) (PosToken _ (OperatorToken t)) = aleft && ((bleft && apre <= bpre) || apre < bpre)
-        where (_, bpre, bleft) = fromMaybe defaultOpe $ M.lookup t omap
+        where Operator _ bpre bleft = fromMaybe defaultOpe $ M.lookup t omap
 
 -- atom parsers
 parseToken:: Token -> Parser (Maybe Token)
@@ -284,12 +282,12 @@ parseDecla omap = parseIdent >>= \case
 
 parseProgramNoLex:: Parser ([Decla], OpeMap)
 parseProgramNoLex = parseProgram' buildInOpe where
-    buildInOpe = M.fromList [(">>=", (2, 0, True)), ("->", (2, 1, True)), ("|", (2, 2, True)), (".", (2, 100, True))]
+    buildInOpe = M.fromList [(">>=", Operator 2 0 True), ("->", Operator 2 1 True), ("|", Operator 2 2 True), (".", Operator 2 100 True)]
     parseRest:: Decla -> OpeMap -> Parser ([Decla], OpeMap)
     parseRest x omap = parseProgram' omap >>= \(xs, omap')-> return (x:xs, omap')
     parseProgram':: OpeMap -> Parser ([Decla], OpeMap)
     parseProgram' omap = parseDecla omap >>= \case
-        Just x@(InfixDecla leftAssoc narg pre (Ident _ s)) -> parseRest x $ M.insert s (narg, pre, leftAssoc) omap
+        Just x@(InfixDecla leftAssoc narg pre (Ident _ s)) -> parseRest x $ M.insert s (Operator narg pre leftAssoc) omap
         Just x -> parseRest x omap
         Nothing -> return ([], omap)
 

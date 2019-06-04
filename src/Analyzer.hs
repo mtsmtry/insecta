@@ -110,7 +110,7 @@ buildFomEx opt exp = do
     buildFom e@(FunExpr id@(Ident pos fun) args) = do
         mEnt <- lookupEnt fun
         mArgs <- mapM buildFom args
-        maybeFlip mEnt (analyzeErrorM id "宣言されていない識別子です") $ \ent-> do
+        (flip $ maybe $ analyzeErrorM id "宣言されていない識別子です") mEnt $ \ent-> do
             let ty = entType ent
             nArgs <- checkFunc ty mArgs
             return $ case ty of
@@ -210,14 +210,19 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
             nFun <- normalizeACRest m fun
             return $ ACRestFom rest <$> nFun
         normalizeACRest m fun@(FunFom ACFun _ _ _) = do
-            let varFilter = \case (VarFom id _)-> Just $ idStr id; _-> Nothing
-            let varList = mapMaybe (varFilter >=> \name-> M.lookup name m >>= Just . (name, )) $ funArgs fun
-            let oneEmergeVars = map fst $ filter ((==1) . snd) varList
+            --let varFilter = \case (VarFom id _)-> Just $ idStr id; _-> Nothing
+            --let varList = mapMaybe (varFilter >=> \name-> M.lookup name m >>= Just . (name, )) $ funArgs fun
+            let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap (funArgs fun)
             args <- conjMaybe <$> mapM (normalizeACRest m) (funArgs fun)
             case oneEmergeVars of
                 [] -> return $ (\x-> fun{funArgs=x}) <$> args
-                [var] -> return $ (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
+                [var] -> return $ if fromMaybe 0 (M.lookup var m) > 1 
+                        then (\x-> fun{funArgs=x}) <$> args
+                        else (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
                 _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
+        normalizeACRest m fun@FunFom{} = do
+            args <- conjMaybe <$> mapM (normalizeACRest m) (funArgs fun)
+            return $ (\x-> fun{funArgs=x}) <$> args
         normalizeACRest _ fom = return $ Just fom
         makeVarEmergeMap:: Fom -> M.Map String Int
         makeVarEmergeMap fom = execState (makeVarEmergeMap fom) M.empty where
@@ -225,6 +230,11 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
             makeVarEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
             makeVarEmergeMap fun@FunFom{} = mapM_ makeVarEmergeMap $ funArgs fun
             makeVarEmergeMap fom = return ()
+        varEmergeMap:: [Fom] -> M.Map String Int
+        varEmergeMap foms = execState (mapM_ varEmergeMap foms) M.empty where
+            varEmergeMap:: Fom -> State (M.Map String Int) ()
+            varEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
+            varEmergeMap fom = return ()
         isVarWithName:: String -> Fom -> Bool
         isVarWithName name var@VarFom{} = name == idStr (varName var)
         isVarWithName _ _ = False

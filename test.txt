@@ -21,11 +21,13 @@ infixl 1  <=>
 data N = Zero | Succ(N)
 undef R: Type
 
-undef f: N->N
-undef g: (N, N)->N
+undef operator <	: (R, R)->Prop
+undef operator >	: (R, R)->Prop
+undef operator <=	: (R, R)->Prop
+undef operator >=	: (R, R)->Prop
 
-undef operator +	: (N, N)->N 			latex "+" 
-undef operator *	: (N, N)->N 			latex "\cdot"
+undef operator +	: (R, R)->R 			latex "+" 
+undef operator *	: (R, R)->R 			latex "\cdot"
 # undef operator =>	: (Prop, Prop)->Prop 	latex "\rightarrow"
 undef operator &	: (Prop, Prop)->Prop 	latex "\land"
 undef operator |	: (Prop, Prop)->Prop 	latex "\lir"
@@ -33,14 +35,14 @@ undef operator ~	: Prop->Prop 			latex "\lnot"
 undef inv			: R->R 					latex "$^{-1}"
 undef mns			: R->R 					latex "-"
 
-axiom (a, b: N) 	{ a + b = b + a }
-axiom (a, b, c: N) 	{ a + (b + c) = (a + b) + c }
-axiom (a, b: N) 	{ a * b = b * a }
-axiom (a, b, c: N) 	{ a * (b * c) = (a * b) * c }
+axiom (a, b: R) 	{ a + b = b + a }
+axiom (a, b, c: R) 	{ a + (b + c) = (a + b) + c }
+axiom (a, b: R) 	{ a * b = b * a }
+axiom (a, b, c: R) 	{ a * (b * c) = (a * b) * c }
 
-axiom (a: N) { a + 0 >>= a }
-axiom (a: N) { a * 0 >>= 0 }
-axiom (a: N) { a * 1 >>= a }
+axiom (a: R) { a + 0 >>= a }
+axiom (a: R) { a * 0 >>= 0 }
+axiom (a: R) { a * 1 >>= a }
 
 undef True	: Prop
 undef False	: Prop
@@ -54,9 +56,11 @@ axiom (A, B: Prop) 		{ A | B <=> B | A }
 axiom (A, B, C: Prop) 	{ A | (B | C) <=> (A | B) | C }
 
 axiom (A: Prop) { ~(~A) >>= A }
+
 axiom (A: Prop) { A | True >>= True }
 axiom (A: Prop) { A | False >>= A }
 axiom (A: Prop) { A | A >>= A }
+
 axiom (A: Prop) { A & True >>= A }
 axiom (A: Prop) { A & False >>= False }
 axiom (A: Prop) { A & A >>= A }
@@ -66,7 +70,7 @@ axiom (A, B: Prop) { ~(A | B) >>= ~A | ~B }
 
 axiom (A, B: Prop) { A & B => A }
 
-axiom (a, b, c: N) { (a + b) * c >>= a * c + b * c }
+axiom (a, b, c: R) { (a + b) * c >>= a * c + b * c }
 axiom (A, B, C: Prop) 	{ (A | B) & C >>= A & C | B & C }
 
 axiom (A: Prop) { A | A >>= A }
@@ -74,6 +78,12 @@ axiom (A: Prop) { A | A >>= A }
 axiom (A: Prop) { A & ~A >>= False }
 axiom (A: Prop) { A | ~A >>= True }
 
+axiom (a: R) 		{ a <= a >>= True }
+axiom (a, b: R) 	{ a <= b & b <= a >>= a = b }
+axiom (a, b, c: R) 	{ a <= b & b <= c => a <= c }
+axiom (a, b: R) 	{ a <= b | b <= a >>= True }
+axiom (a, b, c: R) 	{ a + c <= b + c  >>= a <= b  }
+axiom (a, b: R) 	{ a >= 0 & b >= 0 => a * b >= 0 }
 
 axiom (A, B, C: Prop) {
 	(A | B) & C >>= A & C | B & C

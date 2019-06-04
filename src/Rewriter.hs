@@ -215,7 +215,7 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
         simpCompare (_, a) (_, b) = compare b a
         heads = sortBy simpCompare $ nub $ lookupHeads e
     simplifyStepAndNom:: Fom -> Maybe Fom
-    simplifyStepAndNom x = simplifyStep x >>= Just . normalizeACRewrite
+    simplifyStepAndNom = simplifyStep >=> Just . normalizeACRewrite
 
 type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
 

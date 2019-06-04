@@ -57,7 +57,8 @@ simplifyTest omap fom = do
     let fomStr = show fom
     res <- simplify fom
     let latStr = show $ latestFom res
-    return $ fomStr ++ "\n" ++ latStr ++ "\n" ++ showFom omap res
+    let rewStr = showRewrites omap fom
+    return $ fomStr ++ "\n" ++ latStr ++ "\n" ++ rewStr ++ "\n" ++ showFom omap res
 
 derivateTest:: OpeMap -> Fom -> Fom -> Analyzer String
 derivateTest omap a b = do

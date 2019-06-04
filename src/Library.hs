@@ -14,16 +14,6 @@ conjMaybe:: [Maybe a] -> Maybe [a]
 conjMaybe [] = Just []
 conjMaybe (x:xs) = (:) <$> x <*> conjMaybe xs
 
-toJson m = toJsonWith show
-
-toJsonWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
-toJsonWith f m = "{" ++ intercalate ", " (map (\(k, v)-> show k ++ ": " ++ f v) (M.toList m)) ++ "}"
-
-toJsonFormatedWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
-toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ show k ++ ": " ++ f v) (M.toList m)) ++ "\n}"
-
-maybeFlip input nothing just = maybe nothing just input
-
 equalAsSet:: Eq a => [a] -> [a] -> Bool
 equalAsSet xs ys = length xs == length ys && equalAsSet xs ys where
     equalAsSet:: Eq a => [a] -> [a] -> Bool
@@ -32,3 +22,13 @@ equalAsSet xs ys = length xs == length ys && equalAsSet xs ys where
     equalRest:: Eq a => a -> [a] -> [a] -> Maybe [a]
     equalRest x [] _ = Nothing
     equalRest x (y:ys) rest = if x == y then Just $ ys ++ rest else equalRest x ys (y:rest)
+
+mapF:: (a -> m -> m) -> [a] -> m -> m
+mapF f [] m = m
+mapF f (x:xs) m = mapF f xs (f x m) 
+
+toJsonWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
+toJsonWith f m = "{" ++ intercalate ", " (map (\(k, v)-> show k ++ ": " ++ f v) (M.toList m)) ++ "}"
+
+toJsonFormatedWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
+toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ show k ++ ": " ++ f v) (M.toList m)) ++ "\n}"

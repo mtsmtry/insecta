@@ -78,7 +78,9 @@ data Message = Message Ident String
 instance Show Message where
     show (Message id str) = "(" ++ show (idPos id) ++ ") " ++ str
 
-type OpeMap = M.Map String (Int, Int, Bool) -- (argument number, preceed, is left associative)
+data Operator = Operator { opeArgNum::Int, opePreceed::Int, opeLeftAssoc::Bool }
+type OpeMap = M.Map String Operator
+defaultOpe = Operator { opeArgNum=2, opePreceed= -1, opeLeftAssoc=True }
 
 -- Token
 data Token = IdentToken String 
@@ -273,7 +275,6 @@ instance Eq Quantifier where
     _ == _ = False
 
 type EntityMap = M.Map String Entity
-type LatexMap = M.Map String Fom
 
 data Context = Context {
     conOpe::OpeMap,
