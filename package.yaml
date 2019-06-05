@@ -24,6 +24,8 @@ dependencies:
 - bytestring
 - hashmap
 - unordered-containers
+- case-insensitive
+- http-types
 default-extensions: LambdaCase, TupleSections
 name: lightmath
 version: 0.1.0.0
