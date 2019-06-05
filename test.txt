@@ -65,8 +65,8 @@ axiom (A: Prop) { A & True >>= A }
 axiom (A: Prop) { A & False >>= False }
 axiom (A: Prop) { A & A >>= A }
 
-axiom (A, B: Prop) { ~(A & B) >>= ~A & ~B }
-axiom (A, B: Prop) { ~(A | B) >>= ~A | ~B }
+axiom (A, B: Prop) { ~(A & B) >>= ~A | ~B }
+axiom (A, B: Prop) { ~(A | B) >>= ~A & ~B }
 
 axiom (A, B: Prop) { A & B => B }
 
@@ -106,5 +106,5 @@ proof:
 	impl ~A & ~B | ~A | P & ~B | P & Q
 	impl ~A & ~B | ~A | ~B | P & Q
 	step ~(A | B) | ~(A & B) | (P & Q)
-	step ((A | B) & (A & B)) => P & Q
+	step ~((A | B) & (A & B)) | P & Q
 }

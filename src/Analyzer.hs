@@ -47,11 +47,13 @@ isAssociativeRule = onRule isAssociative where
         sameName (x:xs) = let name = funName x in all (\t-> name == funName t) xs
     isAssociative _ _ = False
 
--- f(g(a, b)) = g(f(a), f(b))
-isDistributive:: Fom -> Fom -> Maybe (Fom, UnaryLambda)
-isDistributive bf af@(FunFom ACFun id _ [lf, rg]) = case diffVarList lf rg of
-    Just [(a, b)] -> if bf == expectBf then Just (af, lambda) else Nothing where 
-        expectBf = applyUnaryLambda lambda M.empty af{funArgs=[a, b]}
+-- f(g(a, b)) = h(f(a), f(b))
+isDistributive:: Fom -> Fom -> Maybe (Fom, Fom, UnaryLambda)
+isDistributive bf afFun@(FunFom ACFun id _ [lf, rg]) = case diffVarList lf rg of
+    Just [(a, b)] -> case unifyUnaryLambda lambda bf of
+        Just bfFun@(FunFom ACFun _ _ args) -> if args == [a, b] then Just (bfFun, afFun, lambda) else Nothing
+        _ -> Nothing
+        where
         lambda = UnaryLambda (idStr $ varName a) lf
     Nothing -> Nothing
     where
@@ -61,11 +63,13 @@ isDistributive bf af@(FunFom ACFun id _ [lf, rg]) = case diffVarList lf rg of
         then concat <$> conjMaybe (zipWith diffVarList (funArgs lf) (funArgs rg))
         else Nothing
     diffVarList lf rg = if lf == rg then Just [] else Nothing
+    unifyUnaryLambda:: UnaryLambda -> Fom -> Maybe Fom
+    unifyUnaryLambda (UnaryLambda arg ptn) trg = unify ptn trg >>= M.lookup arg
 isDistributive _ _ = Nothing
 
 isACInsert:: Fom -> Fom -> Maybe (Fom, Fom)
 isACInsert bf@(FunFom ACFun id _ [x@VarFom{}, y@VarFom{}]) af@VarFom{} = if y == af
-    then Just (ACRestFom (idStr $ varName x) (ACInsertFom (idStr $ varName y) bf{funArgs=[]}), ACRestFom (idStr $ varName y) bf{funArgs=[]})
+    then Just (ACRestFom (idStr $ varName x) (ACInsertFom (idStr $ varName y) bf{funArgs=[]}), y)
     else Nothing
 isACInsert _ _ = Nothing
 
@@ -204,9 +208,9 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
 
     normalizeACRule:: (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
     normalizeACRule (Just a, Just b) = case isDistributive a b of
-        Just (acFun, lambda) -> do
-            let rBf = applyUnaryLambda lambda M.empty $ ACRestFom "_" b{funArgs=[]}
-            let rAf = ACEachFom "_" acFun lambda
+        Just (bfFun, afFun, lambda) -> do
+            let rBf = applyUnaryLambda lambda M.empty $ ACRestFom "_" bfFun{funArgs=[]}
+            let rAf = ACEachFom "_" (idStr $ funName bfFun) afFun lambda
             rBf' <- evalStateT (normalizeACRest rBf) []
             return (rBf', Just rAf)
         Nothing -> do
@@ -215,12 +219,9 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     normalizeACRule pair = return pair
 
     normalizeImplACRule::  (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
-    normalizeImplACRule (Just bf, Just af) = case isACInsert bf af of
+    normalizeImplACRule pair@(Just bf, Just af) = case isACInsert bf af of
         Just (nBf, nAf) -> return (Just nBf, Just nAf)
-        Nothing -> do
-            (rAf, list) <- runStateT (normalizeACRest af) []
-            rBf <- evalStateT (normalizeACRest bf) list
-            return $ boxACRest (rBf, rAf)
+        Nothing -> normalizeACRule pair
     normalizeImplACRule pair = return pair
 
     normalizeACRest:: Fom -> StateT [String] Analyzer (Maybe Fom)

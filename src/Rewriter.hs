@@ -156,11 +156,11 @@ assign m fun@(FunFom ACFun _ _ _) = case concatMap toArray args of [x]-> x; xs->
     toArray arg = [arg]
 assign m fom@FunFom{} = applyArgs (assign m) fom
 assign m ACRestFom{} = error "assign m ACRestFom{}"
-assign m (ACEachFom name fun lambda) = case M.lookup name m of 
+assign m (ACEachFom name src fun lambda) = case M.lookup name m of 
     Just list -> fun{funArgs=map (applyUnaryLambda lambda m) $ toList list}
     Nothing -> error "not found"
     where
-    toList trg@FunFom{} = if funName fun == funName trg then funArgs trg else [trg]
+    toList trg@FunFom{} = if src == (idStr $ funName trg) then funArgs trg else [trg]
     toList trg = [trg]
 assign m fom = fom
 

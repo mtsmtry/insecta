@@ -142,7 +142,8 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
     | ACInsertFom { acInsert::String, acInsertFun::Fom }
     | ACRestFom { acRest::String, acFun::Fom }
-    | ACEachFom { acEachList::String, acEachFun::Fom, acEachLambda::UnaryLambda }
+    | ACEachFom { acEachList::String, acEachSrcFun::String, acEachFun::Fom, acEachLambda::UnaryLambda }
+    | ListFom [Fom]
     | RawVarFom Fom
     | UnknownFom
     | TypeOfType deriving (Show)
@@ -167,7 +168,7 @@ showIdent (StrFom id) = id
 showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
 
 evalType:: Fom -> Fom
-evalType (ACEachFom _ fun _) = evalType fun
+evalType (ACEachFom _ _ fun _) = evalType fun
 evalType (ACRestFom _ fun) = evalType fun
 evalType (ACInsertFom _ fun) = evalType fun
 evalType TypeOfType = error "evalType TypeOfType"
