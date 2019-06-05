@@ -106,5 +106,7 @@ proof:
 	impl ~A & ~B | ~A | P & ~B | P & Q
 	impl ~A & ~B | ~A | ~B | P & Q
 	step ~(A | B) | ~(A & B) | (P & Q)
-	step ~((A | B) & (A & B)) | P & Q
+	step ~((A | B) & (A & B)) | (P & Q)
 }
+
+~(A | B) | ~(A & B), ~((A | B) & (A & B)) 

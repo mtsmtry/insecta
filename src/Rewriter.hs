@@ -12,6 +12,7 @@ import Control.Arrow
 import Control.Applicative
 import Library
 import Data
+import Visualizer
 
 instance Eq Fom where
     a@FunFom{} == b@FunFom{} = sameAttr && case (funAttr a, funAttr b) of
@@ -322,9 +323,10 @@ derivateUnfold = applyDiff unfold where
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where
     mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom
-    mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = case mergeRewrite Nothing a a' of
-        Just res -> if hasRewrite res then Just $ appendStep r' (Rewrite r res b) b' else mergeRewrite (Just (r, a, r')) b b'
-        Nothing -> junction >>= \(jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
+    mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = case mergeRewrite junction a a' of
+        Just res -> Just $ if hasRewrite res then app else fromMaybe app $ mergeRewrite (Just (r, a, r')) b b' 
+            where app = appendStep r' (Rewrite r res b) b'
+        Nothing  -> junction >>= \(jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
     mergeRewrite _ former latter@(Rewrite r a b) = mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
     mergeRewrite _ former@(Rewrite r a b) latter = mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
     mergeRewrite _ funA@FunFom{} funB@FunFom{} = if funName funA == funName funB
