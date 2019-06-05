@@ -291,6 +291,7 @@ insertRule rule = case ruleKind rule of
 buildCmd:: IdentWith Command -> Analyzer Command
 buildCmd (id, StepCmd) = return StepCmd
 buildCmd (id, ImplCmd) = return ImplCmd
+buildCmd (id, FoldCmd) = return FoldCmd
 buildCmd (id, UnfoldCmd) = return UnfoldCmd
 buildCmd (id, _) = do
     analyzeErrorM id "無効な命令です"
@@ -406,6 +407,12 @@ buildProofCommand trg UnfoldCmd goal = do
         Just proof -> return $ ProofCommand UnfoldCmd proof
         Nothing -> derivateError "定義の展開" trg UnfoldCmd goal
 
+buildProofCommand trg FoldCmd goal = do
+    res <- derivateFold (trg, goal)
+    case res of
+        Just proof -> return $ ProofCommand UnfoldCmd proof
+        Nothing -> derivateError "定義の畳み込み" trg UnfoldCmd goal
+
 buildProofCommand trg WrongCmd goal = return $ ProofCommand WrongCmd goal
 
 buildProofProcess:: Fom -> StrategyRewrite -> Analyzer (ProofProcess, Fom)
@@ -434,6 +441,14 @@ buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
         (_, org) -> return org
     (org, begin) <- buildProofOrigin nOrg
     (list, end) <- buildProofProcessList begin rews
+    case mRule of
+        Just rule -> do
+            let trg = last $ funArgs $ ruleProp rule 
+            strTrg <- onOpeMap showLatestFom end
+            strGoal <- onOpeMap showLatestFom trg
+            let msg = "最後の命題が'" ++ strTrg ++ "'であるのに対し、目標の命題は'" ++ strGoal ++ "'あり、一致しません"
+            when (end /= trg) $ analyzeError (showIdent end) msg
+        Nothing -> return ()
     return $ Proof org list begin end
     where
     buildError:: String -> Analyzer StrategyOrigin

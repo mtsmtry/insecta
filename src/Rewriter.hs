@@ -275,6 +275,37 @@ derivate = applyDiff derivateByRuleList where
             Nothing -> return Nothing
     derivateByRuleList _ = return Nothing
 
+checkUnfold:: EntityMap -> AssignMap -> Fom -> Fom -> Analyzer (Maybe Fom)
+checkUnfold defMap argMag = checkUnfold where
+    checkUnfold:: Fom -> Fom -> Analyzer (Maybe Fom)
+    checkUnfold (VarFom (Ident _ name) ty) gl =
+        case (M.lookup name defMap, M.lookup name argMag) of
+            (Just defEnt, _) -> do
+                mEnt <- lookupEnt name
+                case mEnt of
+                    Just ent -> return $ if entQtf ent == entQtf defEnt then Just gl else Nothing
+                    Nothing -> insertNewVarDec (entType defEnt) (entQtf defEnt) gl
+            (_, Just arg) -> return $ if arg == gl then Just gl else Nothing
+            (_, _) -> return Nothing
+    checkUnfold def@FunFom{} gl@FunFom{} = if funName def == funName gl 
+        then do
+            mArgs <- mapM (uncurry checkUnfold) (zip (funArgs def) (funArgs gl))
+            return $ (\x-> gl{funArgs=x}) <$> (conjMaybe $ mArgs)
+        else return Nothing
+    checkUnfold def gl = if def == gl then return $ Just gl else return Nothing
+    insertNewVarDec:: Fom -> Quantifier -> Fom -> Analyzer (Maybe Fom)
+    insertNewVarDec ty ForAll (VarFom id _) = do
+        insertEnt id ty
+        return $ Just $ VarFom id ty
+    -- insertNewVarDec ty ForAll fun@FunFom{} = do
+    --     mapM (insertNewVarDec ty ForAll)
+    --     fun{funArgs=funArgs fun}
+    insertNewVarDec ty ForAll fom = return $ Just fom
+    insertNewVarDec ty qtf@Exists{} var@(VarFom id _) = do
+        insertEntMap id ty $ \ent-> ent{entQtf=qtf}
+        return $ Just $ VarFom id ty
+    insertNewVarDec _ _ _ = return Nothing
+
 derivateUnfold:: Derivater
 derivateUnfold = applyDiff unfold where
     getMaybe (Just (Just x)) = Just x
@@ -287,38 +318,19 @@ derivateUnfold = applyDiff unfold where
                 let argAsg = M.fromList $ zip (defArgs def) (funArgs bg)
                 checkUnfold (defScope def) argAsg (defBody def) gl
             _ -> return Nothing
-        where
-        checkUnfold:: EntityMap -> AssignMap -> Fom -> Fom -> Analyzer (Maybe Fom)
-        checkUnfold defMap argMag = checkUnfold where
-            checkUnfold:: Fom -> Fom -> Analyzer (Maybe Fom)
-            checkUnfold (VarFom (Ident _ name) ty) gl =
-                case (M.lookup name defMap, M.lookup name argMag) of
-                    (Just defEnt, _) -> do
-                        mEnt <- lookupEnt name
-                        case mEnt of
-                            Just ent -> return $ if entQtf ent == entQtf defEnt then Just gl else Nothing
-                            Nothing -> insertNewVarDec (entType defEnt) (entQtf defEnt) gl
-                    (_, Just arg) -> return $ if arg == gl then Just gl else Nothing
-                    (_, _) -> return Nothing
-            checkUnfold def@FunFom{} gl@FunFom{} = if funName def == funName gl 
-                then do
-                    mArgs <- mapM (uncurry checkUnfold) (zip (funArgs def) (funArgs gl))
-                    return $ (\x-> gl{funArgs=x}) <$> (conjMaybe $ mArgs)
-                else return Nothing
-            checkUnfold def gl = if def == gl then return $ Just gl else return Nothing
-            insertNewVarDec:: Fom -> Quantifier -> Fom -> Analyzer (Maybe Fom)
-            insertNewVarDec ty ForAll (VarFom id _) = do
-                insertEnt id ty
-                return $ Just $ VarFom id ty
-            -- insertNewVarDec ty ForAll fun@FunFom{} = do
-            --     mapM (insertNewVarDec ty ForAll)
-            --     fun{funArgs=funArgs fun}
-            insertNewVarDec ty ForAll fom = return $ Just fom
-            insertNewVarDec ty qtf@Exists{} var@(VarFom id _) = do
-                insertEntMap id ty $ \ent-> ent{entQtf=qtf}
-                return $ Just $ VarFom id ty
-            insertNewVarDec _ _ _ = return Nothing
     unfold _ = return Nothing
+
+derivateFold:: Derivater
+derivateFold = applyDiff fold where
+    fold:: Derivater
+    fold (bg, gl@FunFom{}) = do
+        mEnt <- lookupEnt (idStr $ funName gl)
+        case (mEnt, entDef <$> mEnt) of
+            (Just ent, Just (Just def)) -> do
+                let argAsg = M.fromList $ zip (defArgs def) (funArgs gl)
+                res <- checkUnfold (defScope def) argAsg (defBody def) bg
+                return $ maybe (Just gl) (const $ Just gl) res
+            _ -> return Nothing
 
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where

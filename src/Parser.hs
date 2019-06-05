@@ -216,6 +216,7 @@ parseStatement omap = parseCmd >>= \case
         Just id@(Ident _ "step") -> return $ Just (id, StepCmd)
         Just id@(Ident _ "impl") -> return $ Just (id, ImplCmd)
         Just id@(Ident _ "unfold") -> return $ Just (id, UnfoldCmd)
+        Just id@(Ident _ "fold") -> return $ Just (id, FoldCmd)
         Just id@(Ident _ "begin") -> return $ Just (id, BeginCmd)
         Just id@(Ident _ "target") -> return $ Just (id, TargetCmd)
         Just id@Ident{} -> return $ Just (id, WrongCmd)

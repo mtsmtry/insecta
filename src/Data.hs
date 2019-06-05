@@ -250,7 +250,7 @@ data Entity = Entity { entName::Ident, entType::Fom, entLatex::Maybe EmbString, 
 
 type IdentWith a = (Ident, a)
 
-data Command = StepCmd | ImplCmd | UnfoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
+data Command = StepCmd | ImplCmd | UnfoldCmd | FoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
 -- data IdentCmd = IdentCmd Ident Command deriving (Show)
 -- data IdentStm = IdentStm { identStmId::Ident, identStmStm::Statement } deriving (Show)
 data Statement = CmdStm (IdentWith Command) Expr
