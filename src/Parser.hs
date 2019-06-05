@@ -282,7 +282,6 @@ parseDecla omap = parseIdent >>= \case
 
 parseProgramNoLex:: Parser ([Decla], OpeMap)
 parseProgramNoLex = parseProgram' buildInOpe where
-    buildInOpe = M.fromList [(">>=", Operator 2 0 True), ("->", Operator 2 1 True), ("|", Operator 2 2 True), (".", Operator 2 100 True)]
     parseRest:: Decla -> OpeMap -> Parser ([Decla], OpeMap)
     parseRest x omap = parseProgram' omap >>= \(xs, omap')-> return (x:xs, omap')
     parseProgram':: OpeMap -> Parser ([Decla], OpeMap)

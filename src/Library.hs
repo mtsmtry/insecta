@@ -32,3 +32,7 @@ toJsonWith f m = "{" ++ intercalate ", " (map (\(k, v)-> show k ++ ": " ++ f v) 
 
 toJsonFormatedWith:: Show k => Show v => (v -> String) -> M.Map k v -> String
 toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ show k ++ ": " ++ f v) (M.toList m)) ++ "\n}"
+
+classify:: (a -> Bool) -> [a] -> ([a], [a])
+classify f [] = ([], [])
+classify f (x:xs) = if f x then (x:a, b) else (a, x:b) where (a, b) = classify f xs

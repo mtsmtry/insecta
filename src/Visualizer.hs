@@ -80,8 +80,9 @@ showFunFom omap fshow f args = if isAlpha (head f)
     bshow fom = fshow omap fom
 
 showFom:: OpeMap -> Fom -> String
+showFom omap (ACInsertFom list fun) = list ++ ".insert(" ++ showFom omap fun ++ ")"
 showFom omap (ACEachFom list fun (UnaryLambda arg body)) = list ++ ".each[" ++ idStr (funName fun) ++ "](" ++ arg ++ "->" ++ showFom omap body ++ ")"
-showFom omap (ACRestFom rest fun) = "{" ++ rest ++ "}" ++ idStr (funName fun) ++ showFom omap fun
+showFom omap (ACRestFom rest fun) = rest ++ ".rest(" ++ showFom omap fun ++ ")"
 showFom omap (PredFom vl ty) = showFom omap vl ++ "." ++ showFom omap ty
 showFom omap UnknownFom = "unknown"
 showFom omap TypeOfType = "Type"
@@ -164,10 +165,10 @@ toJsonList:: [String] -> String
 toJsonList xs = "[" ++ intercalate "," xs ++ "]"
 
 instance ToJson Reason where
-    toJson (NormalReason rule asg) = object [ "kind".= return "normal", "rule".= toJson rule, "asg".= toJsonMap asg ]
-    toJson (UnfoldReason ent asg) = object [ "kind".= return "unfold", "asg".= toJsonMap asg ]
-    toJson EqualReason = object [ "kind".= return "equal" ]
-    toJson ACNormalizeReason = object [ "kind".= return "acnom" ]
+    toJson (NormalReason rule asg) = object [ "kind".= return "Normal", "rule".= toJson rule, "asg".= toJsonMap asg ]
+    toJson (UnfoldReason ent asg) = object [ "kind".= return "Unfold", "asg".= toJsonMap asg ]
+    toJson EqualReason = object [ "kind".= return "Equal" ]
+    toJson ACNormalizeReason = object [ "kind".= return "Sort" ]
 
 instance ToJson Fom where
     toJson fom = object [
@@ -180,12 +181,12 @@ instance ToJson Fom where
         varMap _ = id
         showPart:: Fom -> Analyzer String
         showPart (Rewrite res bf af) = object [
-            "kind".= return "rewrite",
+            "kind".= return "Rewrite",
             "reason".= toJson res,
             "before".= showPart bf,
             "after".= showPart af]
         showPart fom = object [
-            "kind".= return "normal",
+            "kind".= return "Normal",
             "tex".= showLatex fom]
 
 instance ToJson Rule where
@@ -197,4 +198,4 @@ instance ToJson Rule where
         "prop".= toJson (ruleProp rule)]
         where
         showRuleKind:: RuleKind -> String
-        showRuleKind = \case SimpRule-> "simp"; ImplRule-> "impl"; EqualRule-> "equal"
+        showRuleKind = \case SimpRule-> "Simp"; ImplRule-> "Impl"; EqualRule-> "Equal"

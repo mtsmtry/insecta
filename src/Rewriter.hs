@@ -110,6 +110,15 @@ checkInsert name fom = \m-> case M.lookup name m of
     Just x -> if x == fom then Just m else Nothing
     Nothing -> Just $ M.insert name fom m
 
+toFunFom:: AssignMap -> Fom -> Fom
+toFunFom m (ACInsertFom isrtName fom) = case M.lookup isrtName m of
+    Just fun@FunFom{}
+        | funName fun == funName ptn -> ptn{funArgs=(map RawVarFom $ funArgs fun) ++ funArgs ptn}
+        | otherwise -> ptn{funArgs=RawVarFom fun:funArgs ptn}
+    Just fom -> ptn{funArgs=RawVarFom fom:funArgs ptn}
+    where ptn = toFunFom m fom
+toFunFom m fom = fom
+
 unifyWithAsg:: Fom -> Fom -> AssignMap -> Maybe AssignMap
 unifyWithAsg Rewrite{} _ = const $ error "Do not use Rewrite in a rule"
 unifyWithAsg ptn trg@Rewrite{} = unifyWithAsg ptn $ rewLater trg
@@ -118,6 +127,7 @@ unifyWithAsg ptn@(CstFom id ty) trg@(CstFom id' ty') = if id == id' then unifyWi
 unifyWithAsg ptn@NumFom{} trg = if ptn == trg then Just else const Nothing
 unifyWithAsg ptn@StrFom{} trg = if ptn == trg then Just else const Nothing
 unifyWithAsg (PredFom trgVl trgTy) (PredFom ptnVl ptnTy) = unifyWithAsg trgVl ptnVl >=> unifyWithAsg trgTy ptnTy
+unifyWithAsg (RawVarFom ptn) trg = if ptn == trg then Just else const Nothing
 unifyWithAsg ptn@(VarFom id ty) trg = checkInsert (idStr id) (latestFom trg) 
 unifyWithAsg ptn@FunFom{} trg@FunFom{} = case funAttr trg of
     OFun -> unifyFun unifyArgsOrder ptn trg
@@ -127,9 +137,10 @@ unifyWithAsg ptn@FunFom{} trg@FunFom{} = case funAttr trg of
     where
     unifyArgsComm:: [Fom] -> [Fom] -> AssignMap -> Maybe AssignMap
     unifyArgsComm [a, b] [a', b'] = (unifyWithAsg a a' >=> unifyWithAsg b b') <||> (unifyWithAsg a b' >=> unifyWithAsg b a')
-unifyWithAsg (ACRestFom restName ptn) trg@FunFom{} = unifyFun (unifyArgsRandom inserter) ptn trg where
+unifyWithAsg ptn@ACInsertFom{} trg@FunFom{} = \m-> unifyWithAsg (toFunFom m ptn) trg m
+unifyWithAsg (ACRestFom restName ptn) trg@FunFom{} = \m-> unifyFun (unifyArgsRandom inserter) (toFunFom m ptn) trg m where
     inserter [rest] = checkInsert restName rest
-    inserter rests = checkInsert restName trg{funArgs=rests} 
+    inserter rests = checkInsert restName trg{funArgs=rests}
 unifyWithAsg _ _ = const Nothing
 
 unifyList:: (a -> Fom) -> [a] -> Fom -> Maybe (AssignMap, a)
@@ -250,11 +261,10 @@ derivate = applyDiff derivateByRuleList where
     derivateByRule:: Rule -> Derivater
     derivateByRule rule = applyDiff $ derivateByRule rule where
         derivateByRule:: Rule -> Derivater
-        derivateByRule rule (begin, goal) = case unify (ruleBf rule) begin of
-            Just asg -> return $ if assign asg (ruleAf rule) == goal
-                then Just $ Rewrite (NormalReason rule asg) goal begin
-                else Nothing
-            Nothing -> return Nothing
+        derivateByRule rule (begin, goal) = return $ do
+            asgAf <- unify (ruleAf rule) goal
+            asg <- unifyWithAsg (ruleBf rule) begin (traceShow asgAf asgAf)
+            return $ Rewrite (NormalReason rule asg) goal begin
     derivateByRuleList:: Derivater
     derivateByRuleList pair@(FunFom _ h ty as, goal) = do
         rmap <- fmap conImpl getContext

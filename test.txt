@@ -68,10 +68,10 @@ axiom (A: Prop) { A & A >>= A }
 axiom (A, B: Prop) { ~(A & B) >>= ~A & ~B }
 axiom (A, B: Prop) { ~(A | B) >>= ~A | ~B }
 
-axiom (A, B: Prop) { A & B => A }
+axiom (A, B: Prop) { A & B => B }
 
-axiom (a, b, c: R) { (a + b) * c >>= a * c + b * c }
-axiom (A, B, C: Prop) 	{ (A | B) & C >>= A & C | B & C }
+axiom (a, b, c: R)    { (a + b) * c >>= a * c + b * c }
+axiom (A, B, C: Prop) { (A | B) & C >>= A & C | B & C }
 
 axiom (A: Prop) { A | A >>= A }
 

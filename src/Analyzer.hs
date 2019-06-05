@@ -6,6 +6,7 @@ import Data.Monoid
 import Debug.Trace
 import qualified Data.Foldable as F
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Control.Monad
 import Control.Monad.Writer
 import Control.Monad.State
@@ -61,6 +62,12 @@ isDistributive bf af@(FunFom ACFun id _ [lf, rg]) = case diffVarList lf rg of
         else Nothing
     diffVarList lf rg = if lf == rg then Just [] else Nothing
 isDistributive _ _ = Nothing
+
+isACInsert:: Fom -> Fom -> Maybe (Fom, Fom)
+isACInsert bf@(FunFom ACFun id _ [x@VarFom{}, y@VarFom{}]) af@VarFom{} = if y == af
+    then Just (ACRestFom (idStr $ varName x) (ACInsertFom (idStr $ varName y) bf{funArgs=[]}), ACRestFom (idStr $ varName y) bf{funArgs=[]})
+    else Nothing
+isACInsert _ _ = Nothing
 
 data BuildFomOption = AllowUndefined | NotAllowUndefined deriving(Eq, Show)
 
@@ -153,12 +160,16 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     case kind of
-        "=>"  -> normalizeACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule ImplRule (bfFom, afFom)
+        -- ":"   ->  
+        "=>"  -> normalizeImplACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule ImplRule (bfFom, afFom)
         "<=>" -> normalizeACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule EqualRule (bfFom, afFom)
         ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType >>= makeRule SimpRule (bfFom, afFom)
         "="   -> normalizeACRule (bfFom, afFom) >>= sameType >>= makeRule EqualRule (bfFom, afFom)
         _     -> analyzeErrorM rId "無効な命題です"
     where
+   -- makePredRule::(Maybe Fom, Maybe Fom) -> Maybe (Fom, Fom) -> Analyzer (Maybe Rule) = 
+   -- makePredRule
+   --     PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
     makeRule:: RuleKind -> (Maybe Fom, Maybe Fom) -> Maybe (Fom, Fom) -> Analyzer (Maybe Rule)
     makeRule kind (Just bf, Just af) (Just (rBf, rAf))= do
         mLabel <- getLabel bf
@@ -196,30 +207,42 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
         Just (acFun, lambda) -> do
             let rBf = applyUnaryLambda lambda M.empty $ ACRestFom "_" b{funArgs=[]}
             let rAf = ACEachFom "_" acFun lambda
-            rBf' <- normalizeACRest rBf
+            rBf' <- evalStateT (normalizeACRest rBf) []
             return (rBf', Just rAf)
         Nothing -> do
-            nomA <- normalizeACRest a
+            nomA <- evalStateT (normalizeACRest a) []
             return $ boxACRest (nomA, Just b)
     normalizeACRule pair = return pair
 
-    normalizeACRest:: Fom -> Analyzer (Maybe Fom)
+    normalizeImplACRule::  (Maybe Fom, Maybe Fom) -> Analyzer (Maybe Fom, Maybe Fom)
+    normalizeImplACRule (Just bf, Just af) = case isACInsert bf af of
+        Just (nBf, nAf) -> return (Just nBf, Just nAf)
+        Nothing -> do
+            (rAf, list) <- runStateT (normalizeACRest af) []
+            rBf <- evalStateT (normalizeACRest bf) list
+            return $ boxACRest (rBf, rAf)
+    normalizeImplACRule pair = return pair
+
+    normalizeACRest:: Fom -> StateT [String] Analyzer (Maybe Fom)
     normalizeACRest trg = normalizeACRest (makeVarEmergeMap trg) trg where
-        normalizeACRest:: M.Map String Int -> Fom -> Analyzer (Maybe Fom)
+        normalizeACRest:: M.Map String Int -> Fom -> StateT [String] Analyzer (Maybe Fom)
         normalizeACRest m (ACRestFom rest fun) = do
             nFun <- normalizeACRest m fun
             return $ ACRestFom rest <$> nFun
         normalizeACRest m fun@(FunFom ACFun _ _ _) = do
-            --let varFilter = \case (VarFom id _)-> Just $ idStr id; _-> Nothing
-            --let varList = mapMaybe (varFilter >=> \name-> M.lookup name m >>= Just . (name, )) $ funArgs fun
-            let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap (funArgs fun)
-            args <- conjMaybe <$> mapM (normalizeACRest m) (funArgs fun)
-            case oneEmergeVars of
-                [] -> return $ (\x-> fun{funArgs=x}) <$> args
-                [var] -> return $ if fromMaybe 0 (M.lookup var m) > 1 
-                        then (\x-> fun{funArgs=x}) <$> args
-                        else (\x-> ACRestFom var fun{funArgs=filter (not . isVarWithName var) x}) <$> args
-                _ -> analyzeErrorM (funName fun) $ show oneEmergeVars ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
+            acList <- get
+            let oneVars = let oneEmergeVars = map fst $ filter ((==1) . snd) $ M.toList $ varEmergeMap (funArgs fun)
+                           in filter ((==Just 1) . flip M.lookup m) oneEmergeVars
+            let (acInserts, acRests) = classify (`elem` acList) oneVars
+            args <- let varDelArgs = filter (not . isVarWithNames oneVars) (funArgs fun)
+                     in conjMaybe <$> mapM (normalizeACRest m) varDelArgs
+            let acInserted = (\x-> acInsert acInserts fun{funArgs=x}) <$> args
+            case acRests of
+                [] -> return acInserted
+                [var] -> do
+                    put $ var:acList
+                    return $ ACRestFom var <$> acInserted
+                _ -> lift $ analyzeErrorM (funName fun) $ show acRests ++ ":AC演算子の余剰項の代入候補となる変数が2つ以上あり、代入方法が決定不能です"
         normalizeACRest m fun@FunFom{} = do
             args <- conjMaybe <$> mapM (normalizeACRest m) (funArgs fun)
             return $ (\x-> fun{funArgs=x}) <$> args
@@ -235,9 +258,12 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
             varEmergeMap:: Fom -> State (M.Map String Int) ()
             varEmergeMap (VarFom id _) = state $ ((), ) . M.alter (Just . maybe 1 (1+)) (idStr id)
             varEmergeMap fom = return ()
-        isVarWithName:: String -> Fom -> Bool
-        isVarWithName name var@VarFom{} = name == idStr (varName var)
-        isVarWithName _ _ = False
+        isVarWithNames:: [String] -> Fom -> Bool
+        isVarWithNames names var@VarFom{} = idStr (varName var) `elem` names
+        isVarWithNames _ _ = False
+        acInsert:: [String] -> Fom -> Fom
+        acInsert [] fom = fom
+        acInsert (x:xs) fom = acInsert xs $ ACInsertFom x fom
 
     boxACRest:: (Maybe Fom, Maybe Fom) -> (Maybe Fom, Maybe Fom)
     boxACRest (Just fun@(FunFom ACFun id ty _), Just af) =

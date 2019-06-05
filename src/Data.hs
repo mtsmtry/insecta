@@ -140,8 +140,10 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | StrFom Ident
     | NumFom IdentInt
     | Rewrite { rewReason::Reason, rewLater::Fom, rewOlder::Fom }
+    | ACInsertFom { acInsert::String, acInsertFun::Fom }
     | ACRestFom { acRest::String, acFun::Fom }
     | ACEachFom { acEachList::String, acEachFun::Fom, acEachLambda::UnaryLambda }
+    | RawVarFom Fom
     | UnknownFom
     | TypeOfType deriving (Show)
 
@@ -167,6 +169,7 @@ showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
 evalType:: Fom -> Fom
 evalType (ACEachFom _ fun _) = evalType fun
 evalType (ACRestFom _ fun) = evalType fun
+evalType (ACInsertFom _ fun) = evalType fun
 evalType TypeOfType = error "evalType TypeOfType"
 evalType Rewrite{} = error "evalType Rewrite{}"
 evalType fom@FunFom{} = funType fom
@@ -207,7 +210,7 @@ applyArgsOnce apply fun@FunFom{} = do
 -- Rewriting
 data RuleKind = SimpRule | ImplRule | EqualRule deriving (Eq, Show)
 data PredRule = PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
-data Rule = Rule{ 
+data Rule = Rule { 
     ruleKind::RuleKind,
     ruleIdent::Ident,
     ruleProof::Maybe Proof,
@@ -286,6 +289,13 @@ data Context = Context {
 
 makeEntity:: Ident -> Fom -> Entity
 makeEntity id ty = Entity { entName=id, entType=ty, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing, entQtf=ForAll }
+
+buildInOpe = M.fromList [
+    (">>=", Operator 2 0 True), 
+    (":", Operator 2 0 True),
+    ("->", Operator 2 1 True), 
+    ("|", Operator 2 2 True), 
+    (".", Operator 2 100 True)]
 
 newContext:: OpeMap -> Context
 newContext omap = Context {

@@ -39,7 +39,10 @@ handler request = do
     let result = case M.lookup "q" query of
             Just q -> mainFunc file q
             Nothing -> ""
-    pure $ responseOK & responseBody ?~ result
+    let headers = HM.fromList [(T.pack "", T.pack "")]
+    let body = responseOK & responseBody ?~ result
+    --let body' = set agprsHeaders headers body
+    pure body
 
 mainFunc:: String -> String -> String
 mainFunc prg str = res where
