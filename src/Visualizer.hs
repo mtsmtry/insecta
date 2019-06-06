@@ -135,7 +135,10 @@ showContext con = showMapList (showEntity omap) (concatMap M.toList $ conEnt con
     ++ show (conList con) where omap = conOpe con
 
 showEmb:: EmbString -> [String] -> String
-showEmb [EmbStr str] args = intercalate (str ++ " ") args
+showEmb [EmbStr str] args = intercalate (nolSlash str ++ " ") args where
+    nolSlash:: String -> String
+    nolSlash ('/':xs) = "//" ++ nolSlash xs
+    nolSlash (x:xs) = x:nolSlash xs
 showEmb parts args = concatMap showPart parts where
     showPart:: EmbPart -> String
     showPart (EmbVar var) = args !! var
