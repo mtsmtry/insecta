@@ -410,7 +410,7 @@ buildProofCommand trg UnfoldCmd goal = do
 buildProofCommand trg FoldCmd goal = do
     res <- derivateFold (trg, goal)
     case res of
-        Just proof -> return $ ProofCommand UnfoldCmd proof
+        Just proof -> return $ ProofCommand FoldCmd proof
         Nothing -> derivateError "定義の畳み込み" trg UnfoldCmd goal
 
 buildProofCommand trg WrongCmd goal = return $ ProofCommand WrongCmd goal
@@ -473,6 +473,20 @@ loadVarDec (id, exp) = do
 loadVarDecs:: [[(Ident, Expr)]] -> Analyzer ()
 loadVarDecs = mapM_ (mapM_ loadVarDec)
 
+loadStatement:: IdentWith Statement -> Analyzer ()
+loadStatement (id, ForAllStm var ty) = do
+    mFom <- buildFom ty
+    maybe (return ()) (insertEnt var) mFom
+loadStatement (id, ExistsStm var refs ty) = do
+    mFom <- buildFom ty
+    maybe (return ()) (\x-> insertEntMap var x $ \ent-> ent{entQtf=Exists refs}) mFom
+loadStatement (id, _) = analyzeError id "このステートメントは使用できません"
+
+loadDefineBody:: DefineBody -> Analyzer (Maybe Fom)
+loadDefineBody (DefineBody stms def) = do
+    mapM_ loadStatement stms
+    buildFom def
+
 loadDecla:: Decla -> Analyzer ()
 loadDecla (TheoremDecla decs prop stms) = do
     (prf, mRule) <- subScope $ do
@@ -497,7 +511,7 @@ loadDecla (DefineDecla id decs ret def) = do
         loadVarDecs decs
         mArgTys <- mapM (buildFom . snd) (last decs)
         mRetTy <- buildFom ret
-        mDef <- buildFom def
+        mDef <- loadDefineBody def
         scope <- getLocalEntMap
         return (mArgTys, mRetTy, mDef, scope)
     case (conjMaybe mArgTys, mRetTy, mDef) of
@@ -505,6 +519,20 @@ loadDecla (DefineDecla id decs ret def) = do
             let def = Define { defScope=scope, defBody=body, defArgs=map (idStr . fst) $ last decs} 
             let ty = FunTypeFom { funTypeIdent = id, funArgTypes = argTys, funRetType = retTy }
             insertEntMap id ty $ \ent-> ent{entDef=Just def}
+        _ -> return ()
+
+loadDecla (PredicateDecla id this thisTy decs def) = do
+    subRes <- subScope $ do
+        loadVarDecs decs
+        mArgTys <- mapM (buildFom . snd) (last decs)
+        mThisTy <- buildFom thisTy
+        mDef <- loadDefineBody def
+        scope <- getLocalEntMap
+        return (conjMaybe mArgTys, mThisTy, mDef, scope)
+    case subRes of
+        (Just argTys, Just thisTy, Just def, scope) -> do
+            let ent = PredEntity { predSelf=this, predExtend=thisTy, predDef=def, predName=id }
+            updateEnt $ mapHead $ M.insert (idStr id) ent
         _ -> return ()
 
 loadDecla (DataTypeDecla id def) = do

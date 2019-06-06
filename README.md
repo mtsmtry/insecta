@@ -60,14 +60,14 @@ API化して、証明を検索したり、自分で定理を簡単に証明で�
 - Insectaの場合
 ```
 theorem (a, b: R) (f: Converge(a), g: Converge(b)) {
-    n->f[n] * g[n]: Converge(a * b)
+    fun n => f[n] * g[n]: Converge(a * b)
 proof:
     let M = max(f, g)
     forall eps: R
     target f.Converge(a) & g.Converge(b)
     unfold n >= n_1 -> dist(a, f(n)) < eps/(2*M) & n >= n_2 -> dist(b, g(n)) < eps/(2*abs(a)+1)
     impl assume n >= n_1 & n >= n_2 {
-        begin dist(a, f(n)) < eps/(2*M) & dist(b, g(n)) < eps/(2*abs(a)+1)
+        begin dist(a, f(n)) < eps / (2*M) & dist(b, g(n)) < eps / (2*abs(a)+1)
         impl where dist(a*b, f(n)*g(n)) <= $ {
             begin abs(a*(b-g(n))) + abs(g(n)*(a-f(n)))
             step abs(a)*dist(b, g(n)) + abs(g(n))*dist(a, f(n))

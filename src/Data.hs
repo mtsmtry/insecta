@@ -233,10 +233,11 @@ insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
     updateList list = Just $ maybe [rule] (rule:) list
 
 -- Program
+data DefineBody = DefineBody [IdentWith Statement] Expr deriving (Show)
 data Decla = AxiomDecla [VarDec] Expr 
     | TheoremDecla [VarDec] Expr [IdentWith Statement]
-    | DefineDecla Ident [VarDec] Expr Expr
-    | PredicateDecla Ident Ident Expr [VarDec] Expr
+    | DefineDecla Ident [VarDec] Expr DefineBody
+    | PredicateDecla Ident Ident Expr [VarDec] DefineBody
     | DataTypeDecla Ident Expr 
     | UndefDecla Ident Expr (Maybe EmbString)
     | InfixDecla Bool Int Int Ident deriving (Show)
@@ -343,9 +344,11 @@ updateFunAttr:: String -> (FunAttr -> FunAttr) -> Analyzer ()
 updateFunAttr name f = updateEnt $ map $ M.adjust (\ent-> ent{entFunAttr=f $ entFunAttr ent}) name
 
 insertEntMap:: Ident -> Fom -> (Entity -> Entity) -> Analyzer ()
-insertEntMap id ty f = updateEnt $ mapHead $ M.insert (idStr id) $ f $ makeEntity id ty where
-    mapHead f (x:xs) = f x:xs
-    mapHead f [] = []
+insertEntMap id ty f = updateEnt $ mapHead $ M.insert (idStr id) $ f $ makeEntity id ty
+
+mapHead:: (a -> a) -> [a] -> [a]
+mapHead f [] = []
+mapHead f (x:xs) = f x:xs
 
 insertEnt:: Ident -> Fom -> Analyzer ()
 insertEnt name ty = insertEntMap name ty id

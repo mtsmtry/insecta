@@ -98,6 +98,10 @@ proof:
 	unfold ~A | B
 }
 
+pred Max[x: A] (A: R) {
+	a <= x+t
+}
+
 theorem (A, B, P, Q: Prop) {
 	((A => P) & (B => Q)) => ((A & B) => (P & Q))
 proof:

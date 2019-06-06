@@ -184,9 +184,9 @@ parseSwitch:: (String -> Maybe (Parser (Maybe a))) -> Parser (Maybe a) -> Parser
 parseSwitch switch other = Parser $ \case
     [] -> ([], [], Nothing)
     all@(PosToken _ (IdentToken str):ts) -> case switch str of
-        Just parser -> (runParser parser) ts
-        Nothing -> (runParser other) all
-    all -> (runParser other) all
+        Just parser -> runParser parser ts
+        Nothing -> runParser other all
+    all -> runParser other all
 
 parseSequence:: Parser (Maybe a) -> Parser [a]
 parseSequence p = p >>= \case
@@ -202,6 +202,9 @@ parseVarDecSet omap = return (Just VarDecSet) <&&> parseCommaSeparated parseIden
 parseMultiLineStm:: OpeMap -> Parser (Maybe [IdentWith Statement])
 parseMultiLineStm omap = Just <$> parseSequence (parseStatement omap)
 
+parseDefineBody:: OpeMap -> Parser (Maybe DefineBody)
+parseDefineBody omap = return (Just DefineBody) <&&> parseSequence (parseStatement omap) <++> parseExpr omap
+
 parseStatement:: OpeMap -> Parser (Maybe (IdentWith Statement))
 parseStatement omap = parseCmd >>= \case
         Nothing -> return Nothing
@@ -209,6 +212,10 @@ parseStatement omap = parseCmd >>= \case
     where
     switch idCmd = \case
         "assume" -> Just $ return (Just $ AssumeStm idCmd) <++> parseExpr omap <++> parseBlock
+        "forall" -> Just $ return (Just ForAllStm) <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap
+        "exists" -> Just $ return (Just ExistsStm) <++> parseIdent
+                    <::> parseSymbol "[" <&&> parseCommaSeparated parseIdent <::> parseSymbol "]"
+                    <::> parseSymbol ":" <++> parseExpr omap       
         _ -> Nothing
     other idCmd = return (Just $ CmdStm idCmd) <++> parseExpr omap
     parseCmd:: Parser (Maybe (IdentWith Command))
@@ -256,12 +263,12 @@ parseDeclaBody omap "def" = return (Just DefineDecla)
     <++> parseIdent
     <++> parseParenVarDecsSet omap
     <::> parseSymbol ":" <++> parseExpr omap
-    <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "predicate" = return (Just PredicateDecla)
+    <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
+parseDeclaBody omap "pred" = return (Just PredicateDecla)
     <++> parseIdent
     <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap<::> parseSymbol "]"
     <++> parseParenVarDecsSet omap
-    <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
+    <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
 parseDeclaBody omap "data" = return (Just DataTypeDecla)
     <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
 parseDeclaBody omap "undef" = return (Just UndefDecla)
