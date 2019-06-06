@@ -205,6 +205,16 @@ parseMultiLineStm omap = Just <$> parseSequence (parseStatement omap)
 parseDefineBody:: OpeMap -> Parser (Maybe DefineBody)
 parseDefineBody omap = return (Just DefineBody) <&&> parseSequence (parseStatement omap) <++> parseExpr omap
 
+rollback:: Parser (Maybe a) -> (a -> Parser (Maybe b)) -> Parser (Maybe b)
+rollback first second = do
+    toks <- getTokens
+    mRes <- first
+    case mRes of
+        Just res -> second res
+        Nothing -> do
+            putTokens toks
+            return Nothing
+
 parseStatement:: OpeMap -> Parser (Maybe (IdentWith Statement))
 parseStatement omap = parseCmd >>= \case
         Nothing -> return Nothing
@@ -219,15 +229,15 @@ parseStatement omap = parseCmd >>= \case
         _ -> Nothing
     other idCmd = return (Just $ CmdStm idCmd) <++> parseExpr omap
     parseCmd:: Parser (Maybe (IdentWith Command))
-    parseCmd = parseIdent >>= \case
-        Just id@(Ident _ "step") -> return $ Just (id, StepCmd)
-        Just id@(Ident _ "impl") -> return $ Just (id, ImplCmd)
-        Just id@(Ident _ "unfold") -> return $ Just (id, UnfoldCmd)
-        Just id@(Ident _ "fold") -> return $ Just (id, FoldCmd)
-        Just id@(Ident _ "begin") -> return $ Just (id, BeginCmd)
-        Just id@(Ident _ "target") -> return $ Just (id, TargetCmd)
-        Just id@Ident{} -> return $ Just (id, WrongCmd)
-        Nothing -> return Nothing
+    parseCmd = parseIdent `rollback` \case
+        id@(Ident _ "step")    -> return $ Just (id, StepCmd)
+        id@(Ident _ "impl")    -> return $ Just (id, ImplCmd)
+        id@(Ident _ "unfold")  -> return $ Just (id, UnfoldCmd)
+        id@(Ident _ "fold")    -> return $ Just (id, FoldCmd)
+        id@(Ident _ "begin")   -> return $ Just (id, BeginCmd)
+        id@(Ident _ "target")  -> return $ Just (id, TargetCmd)
+        -- id@Ident{} -> return $ Just (id, WrongCmd)
+        _ -> return Nothing
     parseBlock:: Parser (Maybe [IdentWith Statement])
     parseBlock = return (Just id) <::> parseSymbol "{" <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
     withIdent:: Ident -> Parser (Maybe a) -> Parser (Maybe (IdentWith a))
@@ -259,14 +269,14 @@ parseDeclaBody omap "theorem" = return (Just TheoremDecla)
     <++> parseExpr omap
     <::> parseToken (IdentToken "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap
     <::> parseSymbol "}"
-parseDeclaBody omap "def" = return (Just DefineDecla)
+parseDeclaBody omap "fun" = return (Just DefineDecla)
     <++> parseIdent
     <++> parseParenVarDecsSet omap
     <::> parseSymbol ":" <++> parseExpr omap
     <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
 parseDeclaBody omap "pred" = return (Just PredicateDecla)
     <++> parseIdent
-    <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap<::> parseSymbol "]"
+    <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <::> parseSymbol "]"
     <++> parseParenVarDecsSet omap
     <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
 parseDeclaBody omap "data" = return (Just DataTypeDecla)

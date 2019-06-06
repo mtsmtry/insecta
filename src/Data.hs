@@ -47,6 +47,12 @@ instance Monad Parser where
             (msg', tok', x') = g tok
         in  (msg ++ msg', tok', x')
 
+getTokens:: Parser [PosToken]
+getTokens = Parser $ \toks -> ([], toks, toks)
+
+putTokens:: [PosToken] -> Parser ()
+putTokens toks = Parser $ const ([], toks, ())
+
 -- Analyzer Monad
 newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
 

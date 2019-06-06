@@ -89,7 +89,7 @@ axiom (A, B, C: Prop) {
 	(A | B) & C >>= A & C | B & C
 }
 
-def operator => (A, B: Prop): Prop { ~A | B }
+fun operator => (A, B: Prop): Prop { ~A | B }
 
 theorem (A, B: Prop) {
 	(A => B) => (~A | B)
