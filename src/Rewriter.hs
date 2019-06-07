@@ -69,12 +69,13 @@ convert from to = if from == to
         fromMaybe (return False) $ cast to <$> fromEnt <*> toEnt
     where
     cast:: Fom -> Entity -> Entity -> Analyzer Bool
-    cast trg from@PredEntity{} to@Entity{} = return $ predExtend from == trg
-    cast trg from@Entity{} to@PredEntity{} = do
-        rules <- lookupPredRules (idStr $ predName to) (idStr $ showIdent trg)
-        case unifyList predRuleTrg rules trg of
-            Just (asg, rule) -> return True
-            Nothing -> return False
+    cast trg from to = case (entPred from, entPred to) of
+        (Just pred, Nothing) -> return $ varStr pred == (idStr $ entName to)
+        (Nothing, Just pred) -> do
+            rules <- lookupPredRules (varStr pred) (idStr $ showIdent trg)
+            case unifyList predRuleTrg rules trg of
+                Just (asg, rule) -> return True
+                Nothing -> return False
 
 unify:: Fom -> Fom -> Maybe AssignMap
 unify ptn trg = unifyWithAsg ptn trg M.empty

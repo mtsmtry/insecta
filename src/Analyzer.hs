@@ -121,21 +121,27 @@ buildFomEx opt exp = do
     buildFom e@(FunExpr id@(Ident pos fun) args) = do
         mEnt <- lookupEnt fun
         mArgs <- mapM buildFom args
-        (flip $ maybe $ analyzeErrorM id "宣言されていない識別子です") mEnt $ \ent-> do
-            let ty = entType ent
-            nArgs <- checkFunc ty mArgs
-            return $ case ty of
-                tyFun@FunTypeFom{} -> FunFom (entFunAttr ent) id (funRetType tyFun) <$> conjMaybe nArgs
-                _ -> Nothing
+        (flip $ maybe $ analyzeErrorM id "宣言されていない識別子です") mEnt $ \ent->
+            case (entPred ent) of
+                Just this -> analyzePred this (entType ent) mArgs
+                Nothing -> analyzeFun (entFunAttr ent) (entType ent) mArgs
         where
-        checkFunc:: Fom -> [Maybe Fom] -> Analyzer [Maybe Fom]
-        checkFunc (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
+        analyzeFun:: FunAttr -> Fom -> [Maybe Fom] -> Analyzer (Maybe Fom)
+        analyzeFun attr ty mArgs = do
+            nArgs <- conjMaybe <$> checkFun ty mArgs
+            return $ case ty of
+                tyFun@FunTypeFom{} -> FunFom attr id (funRetType tyFun) <$>  nArgs
+                _ -> Nothing
+        analyzePred:: Variable -> Fom -> [Maybe Fom] -> Analyzer (Maybe Fom)
+        analyzePred this ty mArgs = return $ (Just $ PredTypeFom id) <*> (conjMaybe mArgs)
+        checkFun:: Fom -> [Maybe Fom] -> Analyzer [Maybe Fom]
+        checkFun (FunTypeFom _ argTys retTy) argVls = if length argTys /= length argVls
                 then do
                     analyzeErrorB id "引数の数が異なります"
                     return argVls
                 else zipWithM checkType argVls argTys
-        checkFunc _ vls = do
-            analyzeErrorB id $ "Not function:" ++ idStr id
+        checkFun _ vls = do
+            analyzeErrorB id $ "'" ++ idStr id ++ "'は関数ではありません"
             return vls
         checkType:: Maybe Fom -> Fom -> Analyzer (Maybe Fom)
         checkType (Just (VarFom id UnknownFom)) ty = return $ Just $ VarFom id ty
@@ -435,15 +441,17 @@ buildProof (Strategy (StrategyOriginIdent idOrg stOrg) rews) mRule = do
         (Just rule, StrategyOriginAuto)  -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
         (Just rule, StrategyOriginLeft)  -> return $ StrategyOriginFom $ head $ funArgs $ ruleProp rule
         (Just rule, StrategyOriginWhole) -> return $ StrategyOriginFom $ ruleProp rule
+        (Nothing, StrategyOriginAuto)  -> buildError "証明の対象が宣言されていません"
         (Nothing, StrategyOriginLeft)  -> buildError "ルートスコープ以外では使用できません"
         (Nothing, StrategyOriginWhole) -> buildError "ルートスコープ以外では使用できません"
-        (Nothing, StrategyOriginAuto)  -> buildError "証明の対象が宣言されていません"
         (_, org) -> return org
     (org, begin) <- buildProofOrigin nOrg
     (list, end) <- buildProofProcessList begin rews
     case mRule of
         Just rule -> do
-            let trg = last $ funArgs $ ruleProp rule 
+            let trg = case stOrg of 
+                    StrategyOriginWhole -> VarFom (Ident NonePosition "True") TypeOfType
+                    _ -> last $ funArgs $ ruleProp rule
             strTrg <- onOpeMap showLatestFom end
             strGoal <- onOpeMap showLatestFom trg
             let msg = "最後の命題が'" ++ strTrg ++ "'であるのに対し、目標の命題は'" ++ strGoal ++ "'あり、一致しません"
@@ -465,12 +473,13 @@ loadProof rule stms = do
     stg <- buildStrategy stms
     buildProof stg $ Just rule
 
-loadVarDec:: (Ident, Expr) -> Analyzer ()
-loadVarDec (id, exp) = do
+loadVarDec:: VarDec -> Analyzer ()
+loadVarDec (VarDec kind id exp) = do
     mFom <- buildFom exp
-    maybe (return ()) (insertEnt id) mFom
+    let ty = if kind == NormalTyping then mFom else SubTypeFom <$> mFom
+    maybe (return ()) (insertEnt id) ty
 
-loadVarDecs:: [[(Ident, Expr)]] -> Analyzer ()
+loadVarDecs:: [[VarDec]] -> Analyzer ()
 loadVarDecs = mapM_ (mapM_ loadVarDec)
 
 loadStatement:: IdentWith Statement -> Analyzer ()
@@ -509,30 +518,30 @@ loadDecla (UndefDecla id ty mTex) = do
 loadDecla (DefineDecla id decs ret def) = do
     (mArgTys, mRetTy, mDef, scope) <- subScope $ do
         loadVarDecs decs
-        mArgTys <- mapM (buildFom . snd) (last decs)
+        mArgTys <- mapM (buildFom . varDecTy) (last decs)
         mRetTy <- buildFom ret
         mDef <- loadDefineBody def
         scope <- getLocalEntMap
         return (mArgTys, mRetTy, mDef, scope)
     case (conjMaybe mArgTys, mRetTy, mDef) of
         (Just argTys, Just retTy, Just body) -> do
-            let def = Define { defScope=scope, defBody=body, defArgs=map (idStr . fst) $ last decs} 
+            let def = Define { defScope=scope, defBody=body, defArgs=map (idStr . varDecId) $ last decs} 
             let ty = FunTypeFom { funTypeIdent = id, funArgTypes = argTys, funRetType = retTy }
             insertEntMap id ty $ \ent-> ent{entDef=Just def}
         _ -> return ()
 
-loadDecla (PredicateDecla id this thisTy decs def) = do
+loadDecla (PredicateDecla id decs this thisTy def) = do
     subRes <- subScope $ do
         loadVarDecs decs
-        mArgTys <- mapM (buildFom . snd) (last decs)
+        mArgTys <- mapM (buildFom . varDecTy) (last decs)
         mThisTy <- buildFom thisTy
+        maybe (return ()) (insertEnt this) mThisTy
         mDef <- loadDefineBody def
         scope <- getLocalEntMap
         return (conjMaybe mArgTys, mThisTy, mDef, scope)
     case subRes of
-        (Just argTys, Just thisTy, Just def, scope) -> do
-            let ent = PredEntity { predSelf=this, predExtend=thisTy, predDef=def, predName=id }
-            updateEnt $ mapHead $ M.insert (idStr id) ent
+        (Just argTys, Just thisTy, Just def, scope) -> 
+            insertEntMap id TypeOfType $ \ent-> ent{entPred=Just (Variable (idStr this) thisTy)}
         _ -> return ()
 
 loadDecla (DataTypeDecla id def) = do

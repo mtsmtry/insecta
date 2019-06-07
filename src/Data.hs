@@ -53,6 +53,13 @@ getTokens = Parser $ \toks -> ([], toks, toks)
 putTokens:: [PosToken] -> Parser ()
 putTokens toks = Parser $ const ([], toks, ())
 
+rollback:: Parser (Maybe a) -> (a -> Parser (Maybe b)) -> Parser (Maybe b)
+rollback (Parser first) second = Parser $ \ts -> case first ts of
+    (msg1, ts1, Just res1) -> let (Parser g) = second res1 in case g ts of
+        all@(msg2, ts2, Just res2) -> (msg1 ++ msg2, ts2, Just res2)
+        _ -> ([], ts, Nothing)
+    _ -> ([], ts, Nothing)
+
 -- Analyzer Monad
 newtype Analyzer a = Analyzer { analyze::Context -> ([Message], Context, a) }
 
@@ -138,8 +145,9 @@ data UnaryLambda = UnaryLambda { unaryLambdaArg::String, unaryLambdaBody::Fom } 
 data FunAttr = OFun | CFun | AFun | ACFun deriving (Eq, Show)
 
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
+    | PredTypeFom { predTyName::Ident, predTyArgs::[Fom] }
     | PredFom { predVl::Fom, predTy::Fom }
-    | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] } 
+    | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] }
     | CstFom { cstName::Ident, cstType::Fom }
     | VarFom { varName::Ident, varType::Fom }
     | LambdaFom { lambdaType::Fom, lambdaArgs::[String], lambdaBody::Fom }
@@ -149,6 +157,7 @@ data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom
     | ACInsertFom { acInsert::String, acInsertFun::Fom }
     | ACRestFom { acRest::String, acFun::Fom }
     | ACEachFom { acEachList::String, acEachSrcFun::String, acEachFun::Fom, acEachLambda::UnaryLambda }
+    | SubTypeFom Fom
     | ListFom [Fom]
     | RawVarFom Fom
     | UnknownFom
@@ -240,20 +249,27 @@ insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
 
 -- Program
 data DefineBody = DefineBody [IdentWith Statement] Expr deriving (Show)
-data Decla = AxiomDecla [VarDec] Expr 
-    | TheoremDecla [VarDec] Expr [IdentWith Statement]
-    | DefineDecla Ident [VarDec] Expr DefineBody
-    | PredicateDecla Ident Ident Expr [VarDec] DefineBody
+data Decla = AxiomDecla [[VarDec]] Expr 
+    | TheoremDecla [[VarDec]] Expr [IdentWith Statement]
+    | DefineDecla Ident [[VarDec]] Expr DefineBody
+    | PredicateDecla Ident [[VarDec]] Ident Expr DefineBody
     | DataTypeDecla Ident Expr 
     | UndefDecla Ident Expr (Maybe EmbString)
     | InfixDecla Bool Int Int Ident deriving (Show)
 
-type VarDec = [(Ident, Expr)]
-data VarDecSet = VarDecSet [Ident] Expr deriving (Show)
+data TypingKind = NormalTyping | ExtendTyping deriving (Eq, Show)
+data VarDec = VarDec { varDecKind::TypingKind, varDecId::Ident, varDecTy::Expr } deriving (Show)
+data VarDecSet = VarDecSet [Ident] TypingKind Expr deriving (Show)
 
 data Define = Define { defScope::EntityMap, defBody::Fom, defArgs::[String] } deriving (Show)
-data Entity = Entity { entName::Ident, entType::Fom, entLatex::Maybe EmbString, entFunAttr::FunAttr, entDef::Maybe Define, entQtf::Quantifier }
-    | PredEntity { predSelf::Ident, predExtend::Fom, predDef::Fom, predName::Ident } deriving (Show)
+data Variable = Variable { varStr::String, varTy::Fom } deriving (Show)
+data Entity = Entity { entName::Ident,
+    entType::Fom,
+    entLatex::Maybe EmbString,
+    entFunAttr::FunAttr,
+    entDef::Maybe Define,
+    entQtf::Quantifier,
+    entPred::Maybe Variable } deriving (Show)
 
 type IdentWith a = (Ident, a)
 
@@ -266,7 +282,8 @@ data Statement = CmdStm (IdentWith Command) Expr
     | ExistsStm Ident [Ident] Expr
     | ForAllStm Ident Expr deriving (Show)
 
-data StrategyOrigin = StrategyOriginAuto | StrategyOriginWhole | StrategyOriginLeft | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)
+data StrategyOrigin = StrategyOriginAuto | StrategyOriginWhole | StrategyOriginLeft 
+    | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)
 data StrategyOriginIdent = StrategyOriginIdent Ident StrategyOrigin deriving (Show)
 data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy | ForkRewrite [(Command, Strategy)] | WrongRewrite deriving (Show)
 data Strategy = Strategy StrategyOriginIdent [StrategyRewrite] deriving (Show)
@@ -296,7 +313,7 @@ data Context = Context {
     conPred::PredRuleMap }
 
 makeEntity:: Ident -> Fom -> Entity
-makeEntity id ty = Entity { entName=id, entType=ty, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing, entQtf=ForAll }
+makeEntity id ty = Entity { entName=id, entType=ty, entLatex=Nothing, entFunAttr=OFun, entDef=Nothing, entQtf=ForAll, entPred=Nothing }
 
 buildInOpe = M.fromList [
     (">>=", Operator 2 0 True), 
