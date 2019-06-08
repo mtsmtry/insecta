@@ -30,6 +30,7 @@ instance Eq Fom where
     (VarFom a x) == (VarFom b y) = a == b && x == y
     (StrFom a) == (StrFom b) = a == b
     (NumFom a) == (NumFom b) = a == b
+    (SubTypeFom a) == (SubTypeFom b) = a == b
     TypeOfType == TypeOfType = True
     UnknownFom == UnknownFom = True
     a == b = False

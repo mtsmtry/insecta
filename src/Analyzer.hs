@@ -146,7 +146,7 @@ buildFomEx opt exp = do
             else zipWithM checkType argVls argTys
         checkType:: Maybe Fom -> Fom -> Analyzer (Maybe Fom)
         checkType (Just (VarFom id UnknownFom)) ty = return $ Just $ VarFom id ty
-        checkType trg@(Just vl) ty = let vlTy = evalType vl in if vlTy == ty || vlTy == UnknownFom 
+        checkType trg@(Just vl) ty = let vlTy = evalType vl in if checkType ty vlTy || vlTy == UnknownFom 
             then return trg
             else do
                 vStr <- onOpeMap showFom vl
@@ -155,6 +155,11 @@ buildFomEx opt exp = do
                 let msg = "'" ++ vStr ++ "'は'" ++ aStr ++ "'型である必要がありますが、実際は'" ++ eStr ++ "'型です"
                 analyzeError (showIdent vl) msg
                 return trg
+            where
+            checkType:: Fom -> Fom -> Bool
+            checkType expect actual = expect == actual || case evalType actual of
+                SubTypeFom sub -> checkType expect sub
+                _ -> False
         checkType _ _ = return Nothing
 
 buildVariable:: VarDec -> Analyzer (Maybe Variable)
