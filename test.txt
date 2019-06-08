@@ -131,54 +131,26 @@ proof:
 	step s < t
 }
 
-# 19p 絶対値の定義
-def abs(a: R) {
-	a >= 0 ? a : -a
-}
-
-# 19p (1.8)
-theorem (a: R) {
-	abs(-a) => abs(a)
-}
-
-# 19p (1.9)
-theorem (a: R) {
-	abs(-a) <= a
-}
-
-theorem (a: R) {
-	a <= abs(a)
-}
-
 # 定義1
-type UpperBound(A:> R) [x: A] {
+pred UpperBound(A:> R) [x: A] {
 	forall a: R
 	x <= a
-name:
-	"$Aの上界"
 }
 
-type LowerBound(A: where R)[a: A] { 
-	forall x: R
-	x <= a
-name:
-	"$Aの下界"
+pred LowerBound(A:> R) [x: A] { 
+	forall a: R
+	a <= x
 }
 
 # 21p (1.10)
-theorem <A: where R>(b: UpperBound(A), c: A) {
-	b <= c -> c.UpperBound(A)
+theorem (A:> R) (b: UpperBound(A), c: A) {
+	b <= c => c.UpperBound(A)
 proof:
-	fork {
-		target left
-	}
-	fork {
-		target b.UpperBound(A)
-		unfold x <= b
-	}
-	step x <= b & b <= c
+	target left
+	insert b.UpperBound(A)
+	unfold b <= c & x <= b
 	impl x <= c
-	step c.UpperBound(A)
+	fold c.UpperBound(A)
 }
 
 theorem <A: where R>(b: LowerBound(A), c: A) {

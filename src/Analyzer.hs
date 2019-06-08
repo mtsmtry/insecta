@@ -109,6 +109,14 @@ buildFomEx opt exp = do
                 then return $ Just $ VarFom id UnknownFom
                 else analyzeErrorM id "宣言されていない識別子です"
 
+    buildFom (FunExpr id@(Ident pos ".") [vl, ty]) = do
+        vl <- buildFom vl
+        ty <- buildFom ty
+        maybeM checkType ty
+        return $ PredFom <$> vl <*> ty
+        where
+        checkType ty =  when (evalType ty /= TypeOfType) $ analyzeError (showIdent ty) "型ではありません"
+
     buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
         mArgs <- mapM buildFom (extractFromTuple arg)
         mRet <- buildFom ret
@@ -322,6 +330,10 @@ buildCmd (id, cmd) = if cmd `elem` [StepCmd, ImplCmd, FoldCmd, UnfoldCmd]
     else analyzeError id "無効な命令です" >>= const (return WrongCmd)
 
 buildStrategyRewrite:: IdentWith Statement -> Analyzer (Maybe StrategyRewrite)
+buildStrategyRewrite (id, CmdStm (_, InsertCmd) exp) = do
+    fom <- buildFom exp
+    return $ Just $ maybe WrongRewrite InsertRewrite fom
+
 buildStrategyRewrite (id, CmdStm idCmd exp) = do
     cmd <- buildCmd idCmd
     fom <- if cmd == UnfoldCmd
@@ -341,16 +353,21 @@ buildStrategyRewrite (id, ForkStm list) = do
     forks <- mapM buildFork list
     return $ Just $ ForkRewrite forks
     where
-    buildFork:: (IdentWith Command, [IdentWith Statement]) -> Analyzer (Command, Strategy)
-    buildFork (idCmd, stms) = do
-        cmd <- buildCmd idCmd
+    buildFork:: [IdentWith Statement] -> Analyzer (Command, Strategy)
+    buildFork stms = do
         block <- buildStrategy stms
-        return (cmd, block)
+        return (BeginCmd, block)
 
 buildStrategyRewrite (id, VarDecStm decs) = do
     vars <- mapM buildQtfVariable decs
     mapM_ (maybeM insertVar) vars
     return Nothing
+
+buildStrategyWithCmd:: [IdentWith Statement] -> Analyzer (Command, Strategy)
+buildStrategyWithCmd all@((id, cmd):xs) = case cmd of
+    (CmdStm (id, cmd) exp) -> do
+        stg <- buildStrategy xs
+        return (cmd, stg)
 
 buildStrategy:: [IdentWith Statement] -> Analyzer Strategy
 buildStrategy all@((id, cmd):xs) = case cmd of
@@ -373,11 +390,10 @@ buildStrategy all@((id, cmd):xs) = case cmd of
     where
     buildStrategyRewriteList xs = catMaybes <$> mapM buildStrategyRewrite xs
 
-buildProofOrigin:: StrategyOrigin -> Analyzer (ProofOrigin, Fom)
-buildProofOrigin (StrategyOriginContext con) = do
+checkContext:: Fom -> Analyzer (Maybe [(Entity, Fom)])
+checkContext con = do
     let props = extractArgs "&" con
-    preds <- conjMaybe <$> mapM checkCon props
-    return (maybe ProofOriginWrong ProofOriginContext preds, con)
+    conjMaybe <$> mapM checkCon props
     where
     checkCon:: Fom -> Analyzer (Maybe (Entity, Fom))
     checkCon (PredFom (VarFom id _) ty) = do
@@ -389,6 +405,10 @@ buildProofOrigin (StrategyOriginContext con) = do
             Nothing -> analyzeErrorM id "コンテキストにありません"
     checkCon fom = analyzeErrorM (showIdent fom) "述語ではありません"
 
+buildProofOrigin:: StrategyOrigin -> Analyzer (ProofOrigin, Fom)
+buildProofOrigin (StrategyOriginContext con) = do
+    preds <- checkContext con
+    return (maybe ProofOriginWrong ProofOriginContext preds, con)
 buildProofOrigin (StrategyOriginFom fom) = return (ProofOriginFom fom, fom)
 buildProofOrigin StrategyOriginWrong = return (ProofOriginWrong, UnknownFom)
 
@@ -412,12 +432,16 @@ buildProofCommand trg StepCmd goal = do
             let msg = "簡略形は'" ++ strTrg ++ "'と'" ++ strGoal ++ "'であり、一致しません"
             analyzeError (showIdent goal) msg
             return $ ProofCommand StepCmd goal
-buildProofCommand trg ImplCmd goal = derivate (trg, goal) >>= derivateCheck "含意命題" trg ImplCmd goal
+buildProofCommand trg ImplCmd   goal = derivate (trg, goal)       >>= derivateCheck "含意命題" trg ImplCmd goal
 buildProofCommand trg UnfoldCmd goal = derivateUnfold (trg, goal) >>= derivateCheck "定義の展開" trg UnfoldCmd goal
-buildProofCommand trg FoldCmd goal = derivateFold (trg, goal) >>= derivateCheck "定義の畳み込み" trg UnfoldCmd goal
-buildProofCommand trg WrongCmd goal = return $ ProofCommand WrongCmd goal
+buildProofCommand trg FoldCmd   goal = derivateFold (trg, goal)   >>= derivateCheck "定義の畳み込み" trg UnfoldCmd goal
+buildProofCommand trg WrongCmd  goal = return $ ProofCommand WrongCmd goal
 
 buildProofProcess:: Fom -> StrategyRewrite -> Analyzer (ProofProcess, Fom)
+buildProofProcess trg (InsertRewrite fom) = do
+    checkContext fom
+    return (InsertProcess fom, makeBinary "&" trg fom)
+
 buildProofProcess trg (CmdRewrite cmd goal) = do
     proc <- buildProofCommand trg cmd goal
     return (CmdProcess proc, goal)

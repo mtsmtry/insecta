@@ -194,6 +194,9 @@ evalType fom@VarFom{} = varType fom
 evalType StrFom{} = makeType "String"
 evalType NumFom{} = makeType "N"
 evalType FunTypeFom{} = TypeOfType
+evalType PredTypeFom{} = TypeOfType
+evalType PredFom{} = makeType "Prop"
+evalType fom = error $ show fom
 
 makeType:: String -> Fom
 makeType str = CstFom{cstIdent=Ident NonePosition str, cstType=TypeOfType}
@@ -274,20 +277,22 @@ data Entity = Entity { entName::Ident,
 
 type IdentWith a = (Ident, a)
 
-data Command = StepCmd | ImplCmd | UnfoldCmd | FoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
+data Command = StepCmd | ImplCmd | UnfoldCmd | FoldCmd | TargetCmd | InsertCmd | BeginCmd | WrongCmd deriving (Eq, Show)
 data Statement = CmdStm (IdentWith Command) Expr
     | AssumeStm (IdentWith Command) Expr [IdentWith Statement]
-    | ForkStm [(IdentWith Command, [IdentWith Statement])]
+    | ForkStm [[IdentWith Statement]]
     | VarDecStm [QtfVarDec] deriving (Show)
 
 data StrategyOrigin = StrategyOriginAuto | StrategyOriginWhole | StrategyOriginLeft 
     | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)
 data StrategyOriginIdent = StrategyOriginIdent Ident StrategyOrigin deriving (Show)
-data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy | ForkRewrite [(Command, Strategy)] | WrongRewrite deriving (Show)
+data StrategyRewrite = CmdRewrite Command Fom | AssumeRewrite Command Fom Strategy 
+    | ForkRewrite [(Command, Strategy)] | InsertRewrite Fom | WrongRewrite deriving (Show)
 data Strategy = Strategy StrategyOriginIdent [StrategyRewrite] deriving (Show)
 
 data ProofCommand = ProofCommand { prfCmdCmd::Command, prfCmdRewrite::Fom } deriving (Show)
-data ProofProcess = CmdProcess ProofCommand | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess deriving (Show)
+data ProofProcess = CmdProcess ProofCommand | InsertProcess Fom 
+    | AssumeProcess ProofCommand Fom Proof | ForkProcess [(ProofCommand, Proof)] | WrongProcess deriving (Show)
 data ProofOrigin = ProofOriginContext [(Entity, Fom)] | ProofOriginFom Fom | ProofOriginLeft Fom | ProofOriginWrong deriving (Show)
 data Proof = Proof { prfOrigin::ProofOrigin, prfProcesses::[ProofProcess], prfBegin::Fom, prfEnd::Fom } deriving (Show)
 

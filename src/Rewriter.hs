@@ -335,6 +335,7 @@ derivateFold = applyDiff fold where
                 res <- checkUnfold (defScope def) argAsg (defBody def) bg
                 return $ maybe (Just gl) (const $ Just gl) res
             _ -> return Nothing
+    fold (bg, gl@(PredFom vl ty)) = return $ Just gl
 
 mergeRewrite:: Fom -> Fom -> Maybe Fom
 mergeRewrite = mergeRewrite Nothing where

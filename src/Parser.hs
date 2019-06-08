@@ -175,9 +175,11 @@ parseMultiLineStm omap = Just <$> parseSequence (parseStatement omap)
 parseStatement:: OpeMap -> Parser (Maybe (IdentWith Statement))
 parseStatement omap = parseCmd >>= \case
         Just idCmd -> withIdent (fst idCmd) $ parseSwitch (switch idCmd) (other idCmd)
-        Nothing -> parseIdent `rollback` \id-> withIdent id $ case idStr id of
+        Nothing -> parseIdent `rollback` \keyword-> withIdent keyword $ case idStr keyword of
             "forall" -> return (Just VarDecStm) <++> parseForAllVarDecs omap
             "exists" -> return (Just VarDecStm) <++> parseExistsVarDecs omap
+            "fork" -> return (Just (\x xs-> ForkStm (x:xs))) <++> parseBlock <&&> parseSequence parseFork
+                where parseFork = return (Just id) <::> parseToken (IdentToken "fork") <++> parseBlock
             _ -> return Nothing
     where
     switch idCmd = \case
@@ -186,7 +188,7 @@ parseStatement omap = parseCmd >>= \case
     other idCmd = return (Just $ CmdStm idCmd) <++> parseExpr omap
     parseCmd:: Parser (Maybe (IdentWith Command))
     parseCmd = parseIdent `rollback` (\id@(Ident _ str)-> (return . (\case WrongCmd-> Nothing; cmd-> Just (id, cmd)) . cmdCase) str)
-        where cmdCase = \case "step" -> StepCmd; "impl"  -> ImplCmd;  "unfold" -> UnfoldCmd; 
+        where cmdCase = \case "step" -> StepCmd; "impl"  -> ImplCmd;  "unfold" -> UnfoldCmd; "insert" -> InsertCmd;
                               "fold" -> FoldCmd; "begin" -> BeginCmd; "target" -> TargetCmd; _ -> WrongCmd
     parseBlock:: Parser (Maybe [IdentWith Statement])
     parseBlock = return (Just id) <::> parseSymbol "{" <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
