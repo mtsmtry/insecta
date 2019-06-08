@@ -88,7 +88,7 @@ buildFomEx opt exp = do
     normalizeAC fun@(FunFom AFun _ _ [x]) = normalizeAC x
     normalizeAC fun@FunFom{} = case funAttr fun of
         AFun -> nFun
-        ACFun{} -> nFun
+        ACFun -> nFun
         _ -> fun{funArgs=map normalizeAC args}
         where
         args = funArgs fun
@@ -170,16 +170,17 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     bfFom <- buildFom bf
     afFom <- buildFom af
     case kind of
-        -- ":"   ->  
+        ":"   -> makePredRule (bfFom, afFom)
         "=>"  -> normalizeImplACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule ImplRule (bfFom, afFom)
         "<=>" -> normalizeACRule (bfFom, afFom) >>= checkType "Prop" >>= makeRule EqualRule (bfFom, afFom)
         ">>=" -> normalizeACRule (bfFom, afFom) >>= sameType >>= makeRule SimpRule (bfFom, afFom)
         "="   -> normalizeACRule (bfFom, afFom) >>= sameType >>= makeRule EqualRule (bfFom, afFom)
         _     -> analyzeErrorM rId "無効な命題です"
     where
-   -- makePredRule::(Maybe Fom, Maybe Fom) -> Maybe (Fom, Fom) -> Analyzer (Maybe Rule) = 
-   -- makePredRule
-   --     PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
+    makePredRule::(Maybe Fom, Maybe Fom) -> Analyzer (Maybe Rule)
+    makePredRule (Just vl, Just ty) = do
+        when (evalType ty /= TypeOfType) $ analyzeError (showIdent vl) "型ではありません"
+        makeRule PredRule (Just vl, Just ty) (Just (vl, ty))
     makeRule:: RuleKind -> (Maybe Fom, Maybe Fom) -> Maybe (Fom, Fom) -> Analyzer (Maybe Rule)
     makeRule kind (Just bf, Just af) (Just (rBf, rAf))= do
         mLabel <- getLabel bf
@@ -291,8 +292,8 @@ insertRule rule = case ruleKind rule of
         | isCommutativeRule rule -> updateFunAttr (ruleLabel rule) enableCommu
         | otherwise -> analyzeError (ruleIdent rule) "交換律でも結合律でもありません"
         where
-        enableAssoc = \case attr@ACFun{}-> attr; CFun-> ACFun; OFun-> AFun; AFun-> AFun
-        enableCommu = \case attr@ACFun{}-> attr; CFun-> CFun; OFun-> CFun; AFun-> ACFun
+        enableAssoc = \case ACFun-> ACFun; CFun-> ACFun; OFun-> AFun; AFun-> AFun
+        enableCommu = \case ACFun-> ACFun; CFun-> CFun; OFun-> CFun; AFun-> ACFun
 
 buildCmd:: IdentWith Command -> Analyzer Command
 buildCmd (id, StepCmd) = return StepCmd
@@ -477,7 +478,7 @@ loadVarDec:: VarDec -> Analyzer ()
 loadVarDec (VarDec kind id exp) = do
     mFom <- buildFom exp
     let ty = if kind == NormalTyping then mFom else SubTypeFom <$> mFom
-    maybe (return ()) (insertEnt id) ty
+    maybeM (insertEnt id) ty
 
 loadVarDecs:: [[VarDec]] -> Analyzer ()
 loadVarDecs = mapM_ (mapM_ loadVarDec)
@@ -485,10 +486,10 @@ loadVarDecs = mapM_ (mapM_ loadVarDec)
 loadStatement:: IdentWith Statement -> Analyzer ()
 loadStatement (id, ForAllStm var ty) = do
     mFom <- buildFom ty
-    maybe (return ()) (insertEnt var) mFom
+    maybeM (insertEnt var) mFom
 loadStatement (id, ExistsStm var refs ty) = do
     mFom <- buildFom ty
-    maybe (return ()) (\x-> insertEntMap var x $ \ent-> ent{entQtf=Exists refs}) mFom
+    maybeM (\x-> insertEntMap var x $ \ent-> ent{entQtf=Exists refs}) mFom
 loadStatement (id, _) = analyzeError id "このステートメントは使用できません"
 
 loadDefineBody:: DefineBody -> Analyzer (Maybe Fom)
@@ -503,17 +504,17 @@ loadDecla (TheoremDecla decs prop stms) = do
         mRule <- buildRule prop
         prf <- maybe (return Nothing) (\rule-> Just <$> loadProof rule stms) mRule
         return (prf, mRule)
-    maybe (return ()) (\rule-> insertRule rule{ruleProof=prf}) mRule
+    maybeM (\rule-> insertRule rule{ruleProof=prf}) mRule
 
 loadDecla (AxiomDecla decs prop) = do
     mRule <- subScope $ do
         loadVarDecs decs
         buildRule prop
-    maybe (return ()) insertRule mRule
+    maybeM insertRule mRule
 
 loadDecla (UndefDecla id ty mTex) = do
     mTy <- subScope $ buildFom ty
-    maybe (return ()) (\ty-> insertEntMap id ty $ \ent-> ent{entLatex=mTex}) mTy
+    maybeM (\ty-> insertEntMap id ty $ \ent-> ent{entLatex=mTex}) mTy
     
 loadDecla (DefineDecla id decs ret def) = do
     (mArgTys, mRetTy, mDef, scope) <- subScope $ do
@@ -535,7 +536,7 @@ loadDecla (PredicateDecla id decs this thisTy def) = do
         loadVarDecs decs
         mArgTys <- mapM (buildFom . varDecTy) (last decs)
         mThisTy <- buildFom thisTy
-        maybe (return ()) (insertEnt this) mThisTy
+        maybeM (insertEnt this) mThisTy
         mDef <- loadDefineBody def
         scope <- getLocalEntMap
         return (conjMaybe mArgTys, mThisTy, mDef, scope)

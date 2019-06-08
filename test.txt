@@ -89,7 +89,7 @@ axiom (A, B, C: Prop) {
 	(A | B) & C >>= A & C | B & C
 }
 
-fun operator => (A, B: Prop): Prop { ~A | B }
+def operator => (A, B: Prop): Prop { ~A | B }
 
 theorem (A, B: Prop) {
 	(A => B) => (~A | B)
@@ -468,8 +468,8 @@ proof:
 
 # 41p 定理3.6 実数列が収束するための必要十分条件は、コーシー列となることである
 theorem (f: Seq) {
-	f.Converge <-> f.CauchySeq
-proof(->):
+	f.Converge <=> f.CauchySeq
+proof(=>):
 	unfold n >= n_0 -> dist(a, f(n)) < eps
 	forall m: N
 	step n >= n_0 -> dist(a, f(n)) < eps & m >= n_0 -> dist(a, f(n)) < eps
@@ -479,7 +479,7 @@ proof(->):
 		impl dist(f(n), f(m)) < eps
 	}
 	step f.CauchySeq
-proof(<-):
+proof(<=):
 	step f.CauchySeq
 	impl f.Bounded
 	exists g: Bounded

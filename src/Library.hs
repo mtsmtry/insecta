@@ -36,3 +36,6 @@ toJsonFormatedWith f m = "{\t\n" ++ intercalate ",\n" (map (\(k, v)-> "\t" ++ sh
 classify:: (a -> Bool) -> [a] -> ([a], [a])
 classify f [] = ([], [])
 classify f (x:xs) = if f x then (x:a, b) else (a, x:b) where (a, b) = classify f xs
+
+maybeM:: Monad b => (a -> b ()) -> Maybe a -> b ()
+maybeM = maybe (return ())

@@ -111,7 +111,6 @@ parseOne:: ((Position, Token) -> Maybe a) -> Parser (Maybe a)
 parseOne f = Parser $ \case
     [] -> ([], [], Nothing)
     all@(PosToken pos t:ts) -> maybe ([], all, Nothing) (([], ts, ) . Just) $ f (pos, t)
-
 parseToken:: Token -> Parser (Maybe Token)
 parseToken x = parseOne $ \(pos, tok)-> if tok == x then Just x else Nothing
 parseSymbol:: String -> Parser (Maybe Token)
@@ -205,8 +204,7 @@ parseStatement omap = parseCmd >>= \case
         Nothing -> return Nothing
 
 parseVarDecs:: OpeMap -> Parser (Maybe [VarDec])
-parseVarDecs omap = fmap (Just . conv) parse
-    where
+parseVarDecs omap = fmap (Just . conv) parse where
     parse:: Parser [VarDecSet]
     parse = parseCommaSeparated $ parseVarDecSet omap
     conv:: [VarDecSet] -> [VarDec]
@@ -225,7 +223,7 @@ parseDeclaBody omap "axiom" = return (Just AxiomDecla) <++> parseParenVarDecsSet
 parseDeclaBody omap "theorem" = return (Just TheoremDecla) <++> parseParenVarDecsSet omap
     <::> parseSymbol "{" <++> parseExpr omap
     <::> parseToken (IdentToken "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap <::> parseSymbol "}"
-parseDeclaBody omap "fun" = return (Just DefineDecla) <++> parseIdent <++> parseParenVarDecsSet omap
+parseDeclaBody omap "def" = return (Just DefineDecla) <++> parseIdent <++> parseParenVarDecsSet omap
     <::> parseSymbol ":" <++> parseExpr omap
     <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
 parseDeclaBody omap "pred" = return (Just PredicateDecla) <++> parseIdent <++> parseParenVarDecsSet omap
@@ -234,9 +232,9 @@ parseDeclaBody omap "pred" = return (Just PredicateDecla) <++> parseIdent <++> p
 parseDeclaBody omap "data" = return (Just DataTypeDecla)
     <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
 parseDeclaBody omap "undef" = return (Just UndefDecla) <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex
-parseDeclaBody omap "infixl" = return (Just (InfixDecla True 2))  <++> parseNumber <++> parseAnyOperator
+parseDeclaBody omap "infixl" = return (Just (InfixDecla True  2)) <++> parseNumber <++> parseAnyOperator
 parseDeclaBody omap "infixr" = return (Just (InfixDecla False 2)) <++> parseNumber <++> parseAnyOperator 
-parseDeclaBody omap "unaryl" = return (Just (InfixDecla True 1))  <++> parseNumber <++> parseAnyOperator
+parseDeclaBody omap "unaryl" = return (Just (InfixDecla True  1)) <++> parseNumber <++> parseAnyOperator
 parseDeclaBody omap "unaryr" = return (Just (InfixDecla False 1)) <++> parseNumber <++> parseAnyOperator
 parseDeclaBody _ _ = return Nothing
 

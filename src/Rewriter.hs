@@ -16,8 +16,8 @@ import Visualizer
 
 instance Eq Fom where
     a@FunFom{} == b@FunFom{} = sameAttr && case (funAttr a, funAttr b) of
-            (ACFun{}, _) -> equalACFun a b
-            (_, ACFun{}) -> equalACFun a b
+            (ACFun, _) -> equalACFun a b
+            (_, ACFun) -> equalACFun a b
             _ -> funArgs a == funArgs b
         where
         sameAttr:: Bool
@@ -73,7 +73,7 @@ convert from to = if from == to
         (Just pred, Nothing) -> return $ varStr pred == (idStr $ entName to)
         (Nothing, Just pred) -> do
             rules <- lookupPredRules (varStr pred) (idStr $ showIdent trg)
-            case unifyList predRuleTrg rules trg of
+            case unifyList ruleBf rules trg of
                 Just (asg, rule) -> return True
                 Nothing -> return False
 
@@ -224,7 +224,7 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
     applyByHeadList [] _ = Nothing
     applyByHeadList ((f, s):xs) e = (M.lookup f m >>= \x-> applyWithSimp x s e) <|> applyByHeadList xs e
     simplifyStep:: Fom -> Maybe Fom
-    simplifyStep e = applyByHeadList (traceShow heads heads) e where
+    simplifyStep e = applyByHeadList heads e where
         simpCompare (_, a) (_, b) = compare b a
         heads = sortBy simpCompare $ nub $ lookupHeads e
     simplifyStepAndNom:: Fom -> Maybe Fom
@@ -265,7 +265,7 @@ derivate = applyDiff derivateByRuleList where
         derivateByRule:: Rule -> Derivater
         derivateByRule rule (begin, goal) = return $ do
             asgAf <- unify (ruleAf rule) goal
-            asg <- unifyWithAsg (ruleBf rule) begin (traceShow asgAf asgAf)
+            asg <- unifyWithAsg (ruleBf rule) begin asgAf
             return $ Rewrite (NormalReason rule asg) goal begin
     derivateByRuleList:: Derivater
     derivateByRuleList pair@(FunFom _ h ty as, goal) = do
@@ -370,8 +370,3 @@ mergeRewrite = mergeRewrite Nothing where
         splitWith:: (a -> a -> Bool) -> a -> [a] -> Maybe (a, [a])
         splitWith f it [] = Nothing
         splitWith f it (x:xs) = if f it x then Just (x, xs) else (fmap (x:)) <$> splitWith f it xs
-
-lookupVars:: Fom -> [Ident]
-lookupVars fun@FunFom{} = concatMap lookupVars $ funArgs fun
-lookupVars (VarFom id _) = [id]
-lookupVars _ = []

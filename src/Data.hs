@@ -47,12 +47,6 @@ instance Monad Parser where
             (msg', tok', x') = g tok
         in  (msg ++ msg', tok', x')
 
-getTokens:: Parser [PosToken]
-getTokens = Parser $ \toks -> ([], toks, toks)
-
-putTokens:: [PosToken] -> Parser ()
-putTokens toks = Parser $ const ([], toks, ())
-
 rollback:: Parser (Maybe a) -> (a -> Parser (Maybe b)) -> Parser (Maybe b)
 rollback (Parser first) second = Parser $ \ts -> case first ts of
     (msg1, ts1, Just res1) -> let (Parser g) = second res1 in case g ts of
@@ -224,8 +218,7 @@ applyArgsOnce apply fun@FunFom{} = do
     applyOnce (a:as) as' = maybe (applyOnce as (a:as')) (\x-> Just $ reverse (x:as') ++ as) (apply a)
 
 -- Rewriting
-data RuleKind = SimpRule | ImplRule | EqualRule deriving (Eq, Show)
-data PredRule = PredRule { predRuleTrg::Fom, predRulePredName::String, predRuleTrgLabel::String, predRuleTy::Fom }
+data RuleKind = SimpRule | ImplRule | EqualRule | PredRule deriving (Eq, Show)
 data Rule = Rule { 
     ruleKind::RuleKind,
     ruleIdent::Ident,
@@ -236,11 +229,11 @@ data Rule = Rule {
     ruleProp::Fom } deriving (Show)
 type AssignMap = M.Map String Fom
 type RuleMap = M.Map String [Rule]
-type PredRuleMap = M.Map String (M.Map String [PredRule])
+type PredRuleMap = M.Map String (M.Map String [Rule])
 
-insertPredRuleToMap:: PredRule -> PredRuleMap -> PredRuleMap
-insertPredRuleToMap rule = M.alter updatePredMap (predRulePredName rule) where
-    updatePredMap map = Just $ maybe M.empty (M.alter updateTrgList $ predRuleTrgLabel rule) map
+insertPredRuleToMap:: Rule -> PredRuleMap -> PredRuleMap
+insertPredRuleToMap rule = M.alter updatePredMap (ruleLabel rule) where
+    updatePredMap map = Just $ maybe M.empty (M.alter updateTrgList $ ruleLabel rule) map
     updateTrgList list = Just $ maybe [rule] (rule:) list
 
 insertRuleToMap:: Rule -> RuleMap -> RuleMap
@@ -274,8 +267,6 @@ data Entity = Entity { entName::Ident,
 type IdentWith a = (Ident, a)
 
 data Command = StepCmd | ImplCmd | UnfoldCmd | FoldCmd | TargetCmd | BeginCmd | WrongCmd deriving (Eq, Show)
--- data IdentCmd = IdentCmd Ident Command deriving (Show)
--- data IdentStm = IdentStm { identStmId::Ident, identStmStm::Statement } deriving (Show)
 data Statement = CmdStm (IdentWith Command) Expr
     | AssumeStm (IdentWith Command) Expr [IdentWith Statement]
     | ForkStm [(IdentWith Command, [IdentWith Statement])]
@@ -398,7 +389,7 @@ lookupEnt str = do
     res <- lookupEntWithArea str
     return $ fst <$> res
 
-lookupPredRules:: String -> String -> Analyzer [PredRule]
+lookupPredRules:: String -> String -> Analyzer [Rule]
 lookupPredRules pred trg = do
     rmap <- fmap conPred getContext
     return $ fromMaybe [] $ M.lookup pred rmap >>= M.lookup trg
