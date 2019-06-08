@@ -139,7 +139,7 @@ data UnaryLambda = UnaryLambda { unaryLambdaArg::String, unaryLambdaBody::Fom } 
 data FunAttr = OFun | CFun | AFun | ACFun deriving (Eq, Show)
 
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
-    | PredTypeFom { predTyName::Ident, predTyArgs::[Fom] }
+    | PredTypeFom { predTyName::Ident, predTyArgs::[Fom], predTyBase::Fom }
     | PredFom { predVl::Fom, predTy::Fom }
     | FunFom { funAttr::FunAttr, funIdent::Ident, funType::Fom, funArgs::[Fom] }
     | CstFom { cstIdent::Ident, cstType::Fom }

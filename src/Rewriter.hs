@@ -25,7 +25,7 @@ instance Eq Fom where
         equalACFun:: Fom -> Fom -> Bool
         equalACFun a b = equalAsSet (funArgs a) (funArgs b) where
     (PredFom vl ty) == (PredFom vl' ty') = vl == vl' && ty == ty'
-    (PredTypeFom id args) == (PredTypeFom id' args') = id == id' && args == args'
+    (PredTypeFom id args _) == (PredTypeFom id' args' _) = id == id' && args == args'
     (FunTypeFom id args ret) == (FunTypeFom id' args' ret') = id == id' && args == args' && ret == ret'
     (CstFom a x) == (CstFom b y) = a == b && x == y
     (VarFom a x) == (VarFom b y) = a == b && x == y

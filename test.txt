@@ -153,16 +153,12 @@ proof:
 	fold c.UpperBound(A)
 }
 
-theorem <A: where R>(b: LowerBound(A), c: A) {
-	c <= b -> c.LowerBound(A)
+theorem (A:> R) (b: LowerBound(A), c: A) {
+	c <= b => c.LowerBound(A)
 proof:
-	fork {
-		target left
-	}
-	fork {
-		target b.LowerBound(A)
-		unfold b <= x
-	}
+	target left
+	insert b.LowerBound(A)
+	unfold b <= x
 	step c <= b & b <= x
 	impl c <= x
 	step c.LowerBound(A)
@@ -170,19 +166,19 @@ proof:
 
 theorem (m: R, A:> R) {
 	forall a: A
-	exists b: A
-	m.Sup(A) <-> a <= m & (x < m -> x < b)
+	exists b[a]: A
+	m.Sup(A) <=> a <= m & (x < m => x < b)
 proof:
 	unfold m.Min(UpperBound(A))
 	forall a: UpperBound(A)
 	step m <= a
 }
-
+d
 # 21p 定義 2
-def Sup(A:> R) [x: Min $ UpperBound $ A] {
+pred Sup(A:> R) [x: Min(UpperBound(A))] {
 }
 
-def Inf(A:> R)[x: Max(LowerBound(A))] {
+pred Inf(A:> R) [x: Max(LowerBound(A))] {
 }
 
 # 21p 命題1.3系

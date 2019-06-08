@@ -112,10 +112,19 @@ buildFomEx opt exp = do
     buildFom (FunExpr id@(Ident pos ".") [vl, ty]) = do
         vl <- buildFom vl
         ty <- buildFom ty
-        maybeM checkType ty
+        case (vl, evalType <$> vl, ty) of
+            (Just vl, Just vlTy, Just pred@PredTypeFom{}) -> when (vlTy /= predTyBase pred) $ do
+                strVl <- onOpeMap showFom vl
+                strPred <- onOpeMap showFom pred
+                strBase <- onOpeMap showFom $ predTyBase pred
+                strVlTy <- onOpeMap showFom vlTy
+                let msg = "'" ++ strVl ++ "'は述語型'" ++ strPred ++ "'の主語の型'" ++ strBase ++ "'である必要がありますが、実際は'" ++ strVlTy ++ "'型です"
+                analyzeError (showIdent vl) msg
+            (_, _, Just ty) -> do
+                strTy <- onOpeMap showFom ty
+                analyzeError (showIdent ty) $ "'" ++ strTy ++ "'は" ++ "述語型ではありません"
+            _ -> return ()
         return $ PredFom <$> vl <*> ty
-        where
-        checkType ty =  when (evalType ty /= TypeOfType) $ analyzeError (showIdent ty) "型ではありません"
 
     buildFom (FunExpr id@(Ident pos "->") [arg, ret]) = do
         mArgs <- mapM buildFom (extractFromTuple arg)
@@ -145,7 +154,7 @@ buildFomEx opt exp = do
         analyzePred:: Variable -> Define -> Fom -> [Maybe Fom] -> Analyzer (Maybe Fom)
         analyzePred this def ty mArgs = do
             args <- checkArgs (map varTy $ defArgs def) mArgs
-            return $ (Just $ PredTypeFom id) <*> conjMaybe args
+            return $ (Just $ PredTypeFom id) <*> conjMaybe args <*> Just (varTy this)
         checkArgs:: [Fom] -> [Maybe Fom] -> Analyzer [Maybe Fom]
         checkArgs argTys argVls = if length argTys /= length argVls
             then do
@@ -165,6 +174,7 @@ buildFomEx opt exp = do
                 return trg
             where
             checkType:: Fom -> Fom -> Bool
+            checkType expect pred@PredTypeFom{} = expect == pred || checkType expect (predTyBase pred)
             checkType expect actual = expect == actual || case evalType actual of
                 SubTypeFom sub -> checkType expect sub
                 _ -> False

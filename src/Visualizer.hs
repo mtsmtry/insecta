@@ -81,7 +81,7 @@ showFunFom omap fshow f args = if isAlpha (head f)
 
 showFom:: OpeMap -> Fom -> String
 showFom omap (SubTypeFom sub) = "subtype(" ++ showFom omap sub ++ ")"
-showFom omap (PredTypeFom id args) = idStr id ++ intercalate ", " (map (showFom omap) args)
+showFom omap (PredTypeFom id args _) = idStr id ++ intercalate ", " (map (showFom omap) args)
 showFom omap (ACInsertFom list fun) = list ++ ".insert(" ++ showFom omap fun ++ ")"
 showFom omap (ACEachFom list src fun (UnaryLambda arg body)) = list ++ ".each[" ++ idStr (funIdent fun) ++ "](" ++ arg ++ "->" ++ showFom omap body ++ ")"
 showFom omap (ACRestFom rest fun) = rest ++ ".rest(" ++ showFom omap fun ++ ")"
