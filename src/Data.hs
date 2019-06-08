@@ -247,21 +247,23 @@ insertRuleToMap rule = M.alter updateList (ruleLabel rule) where
     updateList list = Just $ maybe [rule] (rule:) list
 
 -- Program
-data DefineBody = DefineBody [IdentWith Statement] Expr deriving (Show)
-data Decla = AxiomDecla [[VarDec]] Expr 
-    | TheoremDecla [[VarDec]] Expr [IdentWith Statement]
-    | DefineDecla Ident [[VarDec]] Expr DefineBody
-    | PredicateDecla Ident [[VarDec]] Ident Expr DefineBody
-    | DataTypeDecla Ident Expr 
+data DeclaBody = DeclaBody [IdentWith Statement] Expr deriving (Show)
+data Decla = AxiomDecla [[VarDec]] DeclaBody 
+    | TheoremDecla [[VarDec]] DeclaBody [IdentWith Statement]
+    | DefineDecla Ident [[VarDec]] Expr DeclaBody
+    | PredicateDecla Ident [[VarDec]] Ident Expr DeclaBody
+    | DataTypeDecla Ident Expr
     | UndefDecla Ident Expr (Maybe EmbString)
     | InfixDecla Bool Int Int Ident deriving (Show)
 
 data TypingKind = NormalTyping | ExtendTyping deriving (Eq, Show)
 data VarDec = VarDec { varDecKind::TypingKind, varDecId::Ident, varDecTy::Expr } deriving (Show)
+data QtfVarDec = QtfVarDec Quantifier VarDec deriving (Show)
 data VarDecSet = VarDecSet [Ident] TypingKind Expr deriving (Show)
 
 data Define = Define { defScope::EntityMap, defBody::Fom, defArgs::[Variable] } deriving (Show)
 data Variable = Variable { varName::Ident, varTy::Fom } deriving (Show)
+data QtfVariable = QtfVariable Quantifier Variable
 data Entity = Entity { entName::Ident,
         entType::Fom,
         entLatex::Maybe EmbString,
@@ -276,8 +278,7 @@ data Command = StepCmd | ImplCmd | UnfoldCmd | FoldCmd | TargetCmd | BeginCmd | 
 data Statement = CmdStm (IdentWith Command) Expr
     | AssumeStm (IdentWith Command) Expr [IdentWith Statement]
     | ForkStm [(IdentWith Command, [IdentWith Statement])]
-    | ExistsStm Ident [Ident] Expr
-    | ForAllStm Ident Expr deriving (Show)
+    | VarDecStm [QtfVarDec] deriving (Show)
 
 data StrategyOrigin = StrategyOriginAuto | StrategyOriginWhole | StrategyOriginLeft 
     | StrategyOriginFom Fom | StrategyOriginContext Fom | StrategyOriginWrong deriving (Show)

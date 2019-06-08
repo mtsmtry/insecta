@@ -169,23 +169,15 @@ parseTypingKind = do
         ope <- parseToken (OperatorToken ">")
         return $ Just $ if isNothing ope then NormalTyping else ExtendTyping
 
-parseVarDecSet:: OpeMap -> Parser (Maybe VarDecSet)
-parseVarDecSet omap = return (Just VarDecSet) <&&> parseCommaSeparated parseIdent <++> parseTypingKind <++> parseExpr omap
-
 parseMultiLineStm:: OpeMap -> Parser (Maybe [IdentWith Statement])
 parseMultiLineStm omap = Just <$> parseSequence (parseStatement omap)
-
-parseDefineBody:: OpeMap -> Parser (Maybe DefineBody)
-parseDefineBody omap = return (Just DefineBody) <&&> parseSequence (parseStatement omap) <++> parseExpr omap
 
 parseStatement:: OpeMap -> Parser (Maybe (IdentWith Statement))
 parseStatement omap = parseCmd >>= \case
         Just idCmd -> withIdent (fst idCmd) $ parseSwitch (switch idCmd) (other idCmd)
         Nothing -> parseIdent `rollback` \id-> withIdent id $ case idStr id of
-            "forall" -> return (Just ForAllStm) <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap
-            "exists" -> return (Just ExistsStm) <++> parseIdent
-                        <::> parseSymbol "[" <&&> parseCommaSeparated parseIdent <::> parseSymbol "]"
-                        <::> parseSymbol ":" <++> parseExpr omap    
+            "forall" -> return (Just VarDecStm) <++> parseForAllVarDecs omap
+            "exists" -> return (Just VarDecStm) <++> parseExistsVarDecs omap
             _ -> return Nothing
     where
     switch idCmd = \case
@@ -211,37 +203,54 @@ parseVarDecs omap = fmap (Just . conv) parse where
     conv = map make . concatMap (uncurry zip . toTuple)
     make (name, (kind, ty)) = VarDec kind name ty
     toTuple (VarDecSet names kind ty) = (names, repeat (kind, ty))
+    parseVarDecSet:: OpeMap -> Parser (Maybe VarDecSet)
+    parseVarDecSet omap = return (Just VarDecSet) <&&> parseCommaSeparated parseIdent <++> parseTypingKind <++> parseExpr omap
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose
 parseParenVarDecsSet omap = fmap Just $ parseSequence $ parseParenVarDecs omap
+
+parseForAllVarDecs:: OpeMap -> Parser (Maybe [QtfVarDec])
+parseForAllVarDecs omap = return (Just (map (QtfVarDec ForAll))) <++> parseVarDecs omap
+
+parseExistsVarDecs:: OpeMap -> Parser (Maybe [QtfVarDec])
+parseExistsVarDecs omap = leastOne <$> parseCommaSeparated (parseExistsVarDec omap) where
+    leastOne:: [a] -> Maybe [a]
+    leastOne decs = if null decs then Nothing else Just decs
+    existsVarDec:: Ident -> [Ident] -> Expr -> QtfVarDec
+    existsVarDec id refs ty = QtfVarDec (Exists refs) $ VarDec NormalTyping id ty
+    parseExistsVarDec:: OpeMap -> Parser (Maybe QtfVarDec)
+    parseExistsVarDec omap = return (Just existsVarDec) <++> parseIdent 
+        <::> parseSymbol "[" <&&> parseCommaSeparated parseIdent <::> parseSymbol "]" <::> parseSymbol ":" <++> parseExpr omap 
 
 parseLatex:: Parser (Maybe EmbString)
 parseLatex = return (Just id) <::> parseToken (IdentToken "latex") <++> parseEmbString
 
-parseDeclaBody:: OpeMap -> String -> Parser (Maybe Decla)
-parseDeclaBody omap "axiom" = return (Just AxiomDecla) <++> parseParenVarDecsSet omap
-    <::> parseSymbol "{" <++> parseExpr omap <::> parseSymbol "}"
-parseDeclaBody omap "theorem" = return (Just TheoremDecla) <++> parseParenVarDecsSet omap
-    <::> parseSymbol "{" <++> parseExpr omap
-    <::> parseToken (IdentToken "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap <::> parseSymbol "}"
-parseDeclaBody omap "def" = return (Just DefineDecla) <++> parseIdent <++> parseParenVarDecsSet omap
-    <::> parseSymbol ":" <++> parseExpr omap
-    <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
-parseDeclaBody omap "pred" = return (Just PredicateDecla) <++> parseIdent <++> parseParenVarDecsSet omap
-    <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <::> parseSymbol "]"
-    <::> parseSymbol "{" <++> parseDefineBody omap <::> parseSymbol "}"
-parseDeclaBody omap "data" = return (Just DataTypeDecla)
-    <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
-parseDeclaBody omap "undef" = return (Just UndefDecla) <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex
-parseDeclaBody omap "infixl" = return (Just (InfixDecla True  2)) <++> parseNumber <++> parseAnyOperator
-parseDeclaBody omap "infixr" = return (Just (InfixDecla False 2)) <++> parseNumber <++> parseAnyOperator 
-parseDeclaBody omap "unaryl" = return (Just (InfixDecla True  1)) <++> parseNumber <++> parseAnyOperator
-parseDeclaBody omap "unaryr" = return (Just (InfixDecla False 1)) <++> parseNumber <++> parseAnyOperator
-parseDeclaBody _ _ = return Nothing
-
 parseDecla:: OpeMap -> Parser (Maybe Decla)
 parseDecla omap = parseIdent >>= \case
-    Just (Ident _ x)-> parseDeclaBody omap x
+    Just (Ident _ x)-> parseDecla omap x
     Nothing -> return Nothing
+    where
+    parseDeclaBody:: OpeMap -> Parser (Maybe DeclaBody)
+    parseDeclaBody omap = return (Just DeclaBody) <&&> parseSequence (parseStatement omap) <++> parseExpr omap
+    parseDecla:: OpeMap -> String -> Parser (Maybe Decla)
+    parseDecla omap "axiom" = return (Just AxiomDecla) <++> parseParenVarDecsSet omap
+        <::> parseSymbol "{" <++> parseDeclaBody omap <::> parseSymbol "}"
+    parseDecla omap "theorem" = return (Just TheoremDecla) <++> parseParenVarDecsSet omap
+        <::> parseSymbol "{" <++> parseDeclaBody omap
+        <::> parseToken (IdentToken "proof") <::> parseSymbol ":" <++> parseMultiLineStm omap <::> parseSymbol "}"
+    parseDecla omap "def" = return (Just DefineDecla) <++> parseIdent <++> parseParenVarDecsSet omap
+        <::> parseSymbol ":" <++> parseExpr omap
+        <::> parseSymbol "{" <++> parseDeclaBody omap <::> parseSymbol "}"
+    parseDecla omap "pred" = return (Just PredicateDecla) <++> parseIdent <++> parseParenVarDecsSet omap
+        <::> parseSymbol "[" <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <::> parseSymbol "]"
+        <::> parseSymbol "{" <++> parseDeclaBody omap <::> parseSymbol "}"
+    parseDecla omap "data" = return (Just DataTypeDecla)
+        <++> parseIdent <::> parseOperator "=" <++> parseExpr omap
+    parseDecla omap "undef" = return (Just UndefDecla) <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap <!!> parseLatex
+    parseDecla omap "infixl" = return (Just (InfixDecla True  2)) <++> parseNumber <++> parseAnyOperator
+    parseDecla omap "infixr" = return (Just (InfixDecla False 2)) <++> parseNumber <++> parseAnyOperator 
+    parseDecla omap "unaryl" = return (Just (InfixDecla True  1)) <++> parseNumber <++> parseAnyOperator
+    parseDecla omap "unaryr" = return (Just (InfixDecla False 1)) <++> parseNumber <++> parseAnyOperator
+    parseDecla _ _ = return Nothing
 
 parseProgramNoLex:: Parser ([Decla], OpeMap)
 parseProgramNoLex = parseProgram' buildInOpe where

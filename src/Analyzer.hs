@@ -168,6 +168,11 @@ buildVariable (VarDec kind id exp) = do
     let mFom = if kind == NormalTyping then mFom' else SubTypeFom <$> mFom'
     return $ Variable id <$> mFom
 
+buildQtfVariable:: QtfVarDec -> Analyzer (Maybe QtfVariable)
+buildQtfVariable (QtfVarDec qtf dec) = do
+    var <- buildVariable dec
+    maybeN (return . Just . (QtfVariable qtf)) var
+
 makeVarEmergeMap:: Fom -> M.Map String Int
 makeVarEmergeMap fom = execState (makeVarEmergeMap fom) M.empty where
     makeVarEmergeMap:: Fom -> State (M.Map String Int) ()
@@ -308,6 +313,9 @@ insertRule rule = case ruleKind rule of
         enableAssoc = \case ACFun-> ACFun; CFun-> ACFun; OFun-> AFun; AFun-> AFun
         enableCommu = \case ACFun-> ACFun; CFun-> CFun; OFun-> CFun; AFun-> ACFun
 
+insertVar:: QtfVariable -> Analyzer ()
+insertVar (QtfVariable qtf (Variable id ty)) = insertEntMap id ty $ \ent-> ent{entQtf=qtf}
+
 buildCmd:: IdentWith Command -> Analyzer Command
 buildCmd (id, cmd) = if cmd `elem` [StepCmd, ImplCmd, FoldCmd, UnfoldCmd] 
     then return cmd
@@ -339,16 +347,9 @@ buildStrategyRewrite (id, ForkStm list) = do
         block <- buildStrategy stms
         return (cmd, block)
 
-buildStrategyRewrite (id, ForAllStm var ty) = do
-    mFom <- buildFom ty
-    F.forM_ mFom (insertEnt var)
-    return Nothing
-
-buildStrategyRewrite (id, ExistsStm var refs ty) = do
-    mFom <- buildFom ty
-    case mFom of
-        Just fom -> insertEntMap var fom $ \ent-> ent{entQtf=Exists refs}
-        Nothing -> return ()
+buildStrategyRewrite (id, VarDecStm decs) = do
+    vars <- mapM buildQtfVariable decs
+    mapM_ (maybeM insertVar) vars
     return Nothing
 
 buildStrategy:: [IdentWith Statement] -> Analyzer Strategy
@@ -470,34 +471,31 @@ loadProof rule stms = do
 
 loadVariables:: [[VarDec]] -> Analyzer (Maybe [Variable])
 loadVariables varDecs = do
-    vars <- mapM loadVarDecSet varDecs
+    vars <- mapM loadVarDecs varDecs
     return $ last vars
-    where
-    loadVarDecSet:: [VarDec] -> Analyzer (Maybe [Variable])
-    loadVarDecSet varDec = do
-        vars <- mapM buildVariable varDec
-        mapM_ (maybeM (\(Variable id ty)-> insertEnt id ty)) vars
-        return $ conjMaybe vars
+
+loadVarDecs:: [VarDec] -> Analyzer (Maybe [Variable])
+loadVarDecs varDec = do
+    vars <- mapM buildVariable varDec
+    mapM_ (maybeM (\(Variable id ty)-> insertEnt id ty)) vars
+    return $ conjMaybe vars
 
 loadStatement:: IdentWith Statement -> Analyzer ()
-loadStatement (id, ForAllStm var ty) = do
-    mFom <- buildFom ty
-    maybeM (insertEnt var) mFom
-loadStatement (id, ExistsStm var refs ty) = do
-    mFom <- buildFom ty
-    maybeM (\x-> insertEntMap var x $ \ent-> ent{entQtf=Exists refs}) mFom
+loadStatement (id, VarDecStm decs) = do
+    vars <- mapM buildQtfVariable decs
+    mapM_ (maybeM insertVar) vars
 loadStatement (id, _) = analyzeError id "このステートメントは使用できません"
 
-loadDefineBody:: DefineBody -> Analyzer (Maybe Fom)
-loadDefineBody (DefineBody stms def) = do
-    mapM_ loadStatement stms
-    buildFom def
+loadDeclaBody:: DeclaBody -> Analyzer (Maybe Fom)
+loadDeclaBody (DeclaBody stms def) = mapM_ loadStatement stms >>= const (buildFom def)
+loadDeclaRule:: DeclaBody -> Analyzer (Maybe Rule)
+loadDeclaRule (DeclaBody stms def) = mapM_ loadStatement stms >>= const (buildRule def)
 
 loadDecla:: Decla -> Analyzer ()
 loadDecla (TheoremDecla decs prop stms) = do
     (prf, rule) <- subScope $ do
         loadVariables decs
-        rule <- buildRule prop
+        rule <- loadDeclaRule prop
         prf  <- maybe (return Nothing) (\rule-> Just <$> loadProof rule stms) rule
         return (prf, rule)
     maybeM (\rule-> insertRule rule{ruleProof=prf}) rule
@@ -505,7 +503,7 @@ loadDecla (TheoremDecla decs prop stms) = do
 loadDecla (AxiomDecla decs prop) = do
     mRule <- subScope $ do
         loadVariables decs
-        buildRule prop
+        loadDeclaRule prop
     maybeM insertRule mRule
 
 loadDecla (UndefDecla id ty mTex) = do
@@ -516,7 +514,7 @@ loadDecla (DefineDecla id decs ret def) = do
     tuple <- subScope $ do
         args  <- loadVariables decs
         retTy <- buildFom ret
-        body  <- loadDefineBody def
+        body  <- loadDeclaBody def
         scope <- getLocalEntMap
         return (args, retTy, body, scope)
     case tuple of
@@ -531,7 +529,7 @@ loadDecla (PredicateDecla id decs this thisTy def) = do
         args   <- loadVariables decs
         thisTy <- buildFom thisTy
         maybeM (insertEnt this) thisTy
-        body   <- loadDefineBody def
+        body   <- loadDeclaBody def
         scope  <- getLocalEntMap
         return (args, thisTy, body, scope)
     case tuple of

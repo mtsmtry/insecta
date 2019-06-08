@@ -39,3 +39,6 @@ classify f (x:xs) = if f x then (x:a, b) else (a, x:b) where (a, b) = classify f
 
 maybeM:: Monad b => (a -> b ()) -> Maybe a -> b ()
 maybeM = maybe (return ())
+
+maybeN:: Monad b => (a -> b (Maybe c)) -> Maybe a -> b (Maybe c)
+maybeN = maybe (return Nothing)

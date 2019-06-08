@@ -91,14 +91,6 @@ axiom (A, B, C: Prop) {
 
 def operator => (A, B: Prop): Prop { ~A | B }
 
-theorem (A, B: Prop) {
-	(A => B) => (~A | B)
-proof:
-	step A => B
-	step A
-	unfold ~A | B
-}
-
 pred Max(A:> R) [x: A] {
 	forall a: R
 	a <= x
@@ -121,7 +113,6 @@ proof:
 	fold (A & B) => (P & Q)
 }
 
-
 theorem (A:> R) (a, b: Max(A)) {
 	a = b
 proof:
@@ -130,14 +121,13 @@ proof:
 	step a = b
 }
 
-
 # 19p (1.6) Rには最大元、最小元は存在しない
 theorem {
 	forall x: R
-	~ x.Max(R)
+	~(x.Max(R))
 proof:
 	unfold ~(a <= x)
-	exists s, t: R
+	exists t[x]: R
 	step s < t
 }
 
