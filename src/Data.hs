@@ -49,7 +49,7 @@ instance Monad Parser where
 
 rollback:: Parser (Maybe a) -> (a -> Parser (Maybe b)) -> Parser (Maybe b)
 rollback (Parser first) second = Parser $ \ts -> case first ts of
-    (msg1, ts1, Just res1) -> let (Parser g) = second res1 in case g ts of
+    (msg1, ts1, Just res1) -> let (Parser g) = second res1 in case g ts1 of
         all@(msg2, ts2, Just res2) -> (msg1 ++ msg2, ts2, Just res2)
         _ -> ([], ts, Nothing)
     _ -> ([], ts, Nothing)
@@ -175,6 +175,12 @@ showIdent fom@CstFom{} = cstName fom
 showIdent fom@VarFom{} = varName fom
 showIdent (StrFom id) = id
 showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
+showIdent fom@PredFom{} = showIdent $ predVl fom
+showIdent fom@LambdaFom{} = showIdent $ lambdaBody fom
+showIdent fom@PredTypeFom{} = predTyName fom
+showIdent (RawVarFom raw) = showIdent raw
+showIdent UnknownFom = Ident NonePosition "unknown"
+showIdent fom = error $ show fom
 
 evalType:: Fom -> Fom
 evalType (ACEachFom _ _ fun _) = evalType fun

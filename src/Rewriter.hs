@@ -172,8 +172,8 @@ applyUnaryLambda (UnaryLambda arg body) m value = assign (M.insert arg value m) 
 insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
 insertSimp id a b = case (funIdent a, funIdent b) of
     (Just fn, Just gn) -> insertSimpByName (idStr fn) (idStr gn)
-    (Nothing, Just gn) -> analyzeError id "定数は関数よりも常に簡単なため、定数を左辺に使うことはできません"
     (Just fn, Nothing) -> updateList $ \list-> let f = idStr fn in if f `elem` list then list else f:list
+    (Nothing, Just gn) -> analyzeError id "定数は関数よりも常に簡単なため、定数を左辺に使うことはできません"
     (Nothing, Nothing) -> analyzeError id "全ての定数は等しい簡略性を持つため、定数を両端に持つ命題は無効です"
     where
     funIdent:: Fom -> Maybe Ident
@@ -233,7 +233,8 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
 type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
 
 applyDiff:: Derivater -> (Fom, Fom) -> Analyzer (Maybe Fom)
-applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = if funName bg == funName gl && length as == length bs
+applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = 
+    if funName bg == funName gl && length as == length bs
     then case num of
         0 -> return Nothing
         1 -> do

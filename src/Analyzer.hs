@@ -230,7 +230,7 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
         Just (nBf, nAf) -> return (Just nBf, Just nAf)
         Nothing -> normalizeACRule pair
     normalizeImplACRule pair = return pair
-
+    
     normalizeACRest:: Fom -> StateT [String] Analyzer (Maybe Fom)
     normalizeACRest trg = normalizeACRest (makeVarEmergeMap trg) trg where
         normalizeACRest:: M.Map String Int -> Fom -> StateT [String] Analyzer (Maybe Fom)
@@ -277,6 +277,7 @@ buildRule (FunExpr rId@(Ident _ kind) [bf, af]) = do
     boxACRest (Just fun@(FunFom ACFun id ty _), Just af) =
         (Just $ ACRestFom "_" fun, Just fun{funArgs=[VarFom (Ident NonePosition "_") ty, af]})
     boxACRest pair = pair
+buildRule fom = analyzeErrorM (showExprIdent fom) "命題ではありません"
 
 returnMessage:: a -> Message -> Analyzer a
 returnMessage a m = Analyzer ([m], , a)
@@ -296,13 +297,9 @@ insertRule rule = case ruleKind rule of
         enableCommu = \case ACFun-> ACFun; CFun-> CFun; OFun-> CFun; AFun-> ACFun
 
 buildCmd:: IdentWith Command -> Analyzer Command
-buildCmd (id, StepCmd) = return StepCmd
-buildCmd (id, ImplCmd) = return ImplCmd
-buildCmd (id, FoldCmd) = return FoldCmd
-buildCmd (id, UnfoldCmd) = return UnfoldCmd
-buildCmd (id, _) = do
-    analyzeErrorM id "無効な命令です"
-    return WrongCmd
+buildCmd (id, cmd) = if cmd `elem` [StepCmd, ImplCmd, FoldCmd, UnfoldCmd] 
+    then return cmd
+    else analyzeError id "無効な命令です" >>= const (return WrongCmd)
 
 buildStrategyRewrite:: IdentWith Statement -> Analyzer (Maybe StrategyRewrite)
 buildStrategyRewrite (id, CmdStm idCmd exp) = do
@@ -382,8 +379,9 @@ buildProofOrigin (StrategyOriginContext con) = do
 buildProofOrigin (StrategyOriginFom fom) = return (ProofOriginFom fom, fom)
 buildProofOrigin StrategyOriginWrong = return (ProofOriginWrong, UnknownFom)
 
-derivateError:: String -> Fom -> Command -> Fom -> Analyzer ProofCommand
-derivateError str trg cmd goal = do
+derivateCheck:: String -> Fom -> Command -> Fom -> Maybe Fom -> Analyzer ProofCommand
+derivateCheck str trg cmd goal (Just proof) = return $ ProofCommand cmd proof
+derivateCheck str trg cmd goal Nothing = do
     strTrg <- onOpeMap showFom trg
     strGoal <- onOpeMap showLatestFom goal
     analyzeError (showIdent goal) $ str ++ "によって'" ++ strTrg ++ "'から'" ++ strGoal ++ "'を導出できません"
@@ -401,25 +399,9 @@ buildProofCommand trg StepCmd goal = do
             let msg = "簡略形は'" ++ strTrg ++ "'と'" ++ strGoal ++ "'であり、一致しません"
             analyzeError (showIdent goal) msg
             return $ ProofCommand StepCmd goal
-
-buildProofCommand trg ImplCmd goal = do
-    res <- derivate (trg, goal)
-    case res of
-        Just proof -> return $ ProofCommand ImplCmd proof
-        Nothing -> derivateError "含意命題" trg ImplCmd goal
-
-buildProofCommand trg UnfoldCmd goal = do
-    res <- derivateUnfold (trg, goal)
-    case res of
-        Just proof -> return $ ProofCommand UnfoldCmd proof
-        Nothing -> derivateError "定義の展開" trg UnfoldCmd goal
-
-buildProofCommand trg FoldCmd goal = do
-    res <- derivateFold (trg, goal)
-    case res of
-        Just proof -> return $ ProofCommand FoldCmd proof
-        Nothing -> derivateError "定義の畳み込み" trg UnfoldCmd goal
-
+buildProofCommand trg ImplCmd goal = derivate (trg, goal) >>= derivateCheck "含意命題" trg ImplCmd goal
+buildProofCommand trg UnfoldCmd goal = derivateUnfold (trg, goal) >>= derivateCheck "定義の展開" trg UnfoldCmd goal
+buildProofCommand trg FoldCmd goal = derivateFold (trg, goal) >>= derivateCheck "定義の畳み込み" trg UnfoldCmd goal
 buildProofCommand trg WrongCmd goal = return $ ProofCommand WrongCmd goal
 
 buildProofProcess:: Fom -> StrategyRewrite -> Analyzer (ProofProcess, Fom)

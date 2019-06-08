@@ -26,7 +26,7 @@ popToken = Lexer $ \(pos, all) -> case all of
         | x == '#'  -> let (t, rest) = span ('\n' /=) xs in ([], stepChar pos $ length t, rest, Nothing) 
         | x == '\n' -> ([], nextLine pos, xs, Nothing)
         | isSpace x -> ([], nextChar pos, xs, Nothing)
-        | otherwise -> ([Message (Ident pos [x]) "wrong"], nextChar pos, xs, Nothing)
+        | otherwise -> ([Message (Ident pos [x]) "不明な文字です"], nextChar pos, xs, Nothing)
         where
         procAll:: (String -> Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
         procAll cstr cond = ([], newPos, rest, Just $ PosToken pos $ cstr (x:chars)) where
@@ -35,7 +35,7 @@ popToken = Lexer $ \(pos, all) -> case all of
         procQuote:: (String -> Token) -> (Char -> Bool) -> ([Message], Position, String, Maybe PosToken)
         procQuote cstr cond = case span cond xs of
             (chars, _:rest) -> ([], stepChar pos $ length chars, rest, Just $ PosToken pos $ cstr chars)
-            (chars, _) -> ([Message (Ident pos []) "not"], pos, [], Just $ PosToken pos $ cstr chars)
+            (chars, _) -> ([Message (Ident pos []) "終わりの引用符がありません"], pos, [], Just $ PosToken pos $ cstr chars)
     where
     -- Char -> Bool
     [isIdentSymbol, isOperator, isSymbol] = map (flip elem) ["_'" , "+-*/\\<>|?=@^$~`.&%", "(){}[],:"]
@@ -99,7 +99,7 @@ parseExpr omap = Parser $ \ts-> parseExpr ts [] [] where
     apply cond f all = case b of [] -> all; (x:xs) -> a ++ f x:xs
         where (a, b) = span (not <$> cond) all
     getOpe:: Ident -> ([Message], Operator)
-    getOpe x@(Ident pos id) = maybe ([Message x "Not defined infix"], defaultOpe) ([], ) (M.lookup id omap)
+    getOpe x@(Ident pos id) = maybe ([Message x "定義されていない演算子です"], defaultOpe) ([], ) (M.lookup id omap)
     precederEq:: (Int, Bool) -> PosToken -> Bool
     precederEq _ (PosToken _ ParenOpen) = False
     precederEq _ (PosToken _ (IdentToken _)) = True
@@ -180,22 +180,22 @@ parseDefineBody omap = return (Just DefineBody) <&&> parseSequence (parseStateme
 
 parseStatement:: OpeMap -> Parser (Maybe (IdentWith Statement))
 parseStatement omap = parseCmd >>= \case
+        Just idCmd -> withIdent (fst idCmd) $ parseSwitch (switch idCmd) (other idCmd)
         Nothing -> parseIdent `rollback` \id-> withIdent id $ case idStr id of
             "forall" -> return (Just ForAllStm) <++> parseIdent <::> parseSymbol ":" <++> parseExpr omap
             "exists" -> return (Just ExistsStm) <++> parseIdent
                         <::> parseSymbol "[" <&&> parseCommaSeparated parseIdent <::> parseSymbol "]"
                         <::> parseSymbol ":" <++> parseExpr omap    
             _ -> return Nothing
-        Just idCmd -> withIdent (fst idCmd) $ parseSwitch (switch idCmd) (other idCmd)
     where
     switch idCmd = \case
         "assume" -> Just $ return (Just $ AssumeStm idCmd) <++> parseExpr omap <++> parseBlock
         _ -> Nothing
     other idCmd = return (Just $ CmdStm idCmd) <++> parseExpr omap
     parseCmd:: Parser (Maybe (IdentWith Command))
-    parseCmd = parseIdent `rollback` (\id@(Ident _ str)-> (return . (\case WrongCmd->Nothing; cmd-> Just (id, cmd)) . cmdCase) str)
+    parseCmd = parseIdent `rollback` (\id@(Ident _ str)-> (return . (\case WrongCmd-> Nothing; cmd-> Just (id, cmd)) . cmdCase) str)
         where cmdCase = \case "step" -> StepCmd; "impl"  -> ImplCmd;  "unfold" -> UnfoldCmd; 
-                              "fold" -> FoldCmd; "begin" -> BeginCmd; "target" -> TargetCmd; _-> WrongCmd
+                              "fold" -> FoldCmd; "begin" -> BeginCmd; "target" -> TargetCmd; _ -> WrongCmd
     parseBlock:: Parser (Maybe [IdentWith Statement])
     parseBlock = return (Just id) <::> parseSymbol "{" <&&> parseSequence (parseStatement omap) <::> parseSymbol "}"
     withIdent:: Ident -> Parser (Maybe a) -> Parser (Maybe (IdentWith a))
@@ -208,7 +208,7 @@ parseVarDecs omap = fmap (Just . conv) parse where
     parse:: Parser [VarDecSet]
     parse = parseCommaSeparated $ parseVarDecSet omap
     conv:: [VarDecSet] -> [VarDec]
-    conv = (map make) . concatMap (uncurry zip) . (map toTuple)
+    conv = map make . concatMap (uncurry zip . toTuple)
     make (name, (kind, ty)) = VarDec kind name ty
     toTuple (VarDecSet names kind ty) = (names, repeat (kind, ty))
 parseParenVarDecs omap = return (Just id) <::> parseToken ParenOpen <++> parseVarDecs omap <::> parseToken ParenClose

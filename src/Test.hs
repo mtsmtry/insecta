@@ -14,6 +14,7 @@ import Rewriter
 
 showMessage:: Message -> String
 showMessage (Message id msg) = showIdent id ++ ":" ++ msg where
+    showPos NonePosition = "none"
     showPos (Position line column) = show line ++ " " ++ show column
     showIdent (Ident pos str) = "\"" ++ str ++ "\" (" ++ showPos pos ++ ")"
 
