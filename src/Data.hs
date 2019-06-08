@@ -141,9 +141,9 @@ data FunAttr = OFun | CFun | AFun | ACFun deriving (Eq, Show)
 data Fom = FunTypeFom { funTypeIdent::Ident, funArgTypes::[Fom], funRetType::Fom }
     | PredTypeFom { predTyName::Ident, predTyArgs::[Fom] }
     | PredFom { predVl::Fom, predTy::Fom }
-    | FunFom { funAttr::FunAttr, funName::Ident, funType::Fom, funArgs::[Fom] }
-    | CstFom { cstName::Ident, cstType::Fom }
-    | VarFom { varName::Ident, varType::Fom }
+    | FunFom { funAttr::FunAttr, funIdent::Ident, funType::Fom, funArgs::[Fom] }
+    | CstFom { cstIdent::Ident, cstType::Fom }
+    | VarFom { varIdent::Ident, varType::Fom }
     | LambdaFom { lambdaType::Fom, lambdaArgs::[String], lambdaBody::Fom }
     | StrFom Ident
     | NumFom IdentInt
@@ -170,9 +170,9 @@ makeBinary str a b = FunFom OFun (Ident NonePosition str) propType [a, b]
 
 showIdent:: Fom -> Ident
 showIdent fom@FunTypeFom{} = funTypeIdent fom
-showIdent fom@FunFom{} = funName fom
-showIdent fom@CstFom{} = cstName fom
-showIdent fom@VarFom{} = varName fom
+showIdent fom@FunFom{} = funIdent fom
+showIdent fom@CstFom{} = cstIdent fom
+showIdent fom@VarFom{} = varIdent fom
 showIdent (StrFom id) = id
 showIdent (NumFom (IdentInt pos num)) = Ident pos (show num)
 showIdent fom@PredFom{} = showIdent $ predVl fom
@@ -196,7 +196,7 @@ evalType NumFom{} = makeType "N"
 evalType FunTypeFom{} = TypeOfType
 
 makeType:: String -> Fom
-makeType str = CstFom{cstName=Ident NonePosition str, cstType=TypeOfType}
+makeType str = CstFom{cstIdent=Ident NonePosition str, cstType=TypeOfType}
 
 propType = makeType "Prop"
 
@@ -260,15 +260,15 @@ data TypingKind = NormalTyping | ExtendTyping deriving (Eq, Show)
 data VarDec = VarDec { varDecKind::TypingKind, varDecId::Ident, varDecTy::Expr } deriving (Show)
 data VarDecSet = VarDecSet [Ident] TypingKind Expr deriving (Show)
 
-data Define = Define { defScope::EntityMap, defBody::Fom, defArgs::[String] } deriving (Show)
-data Variable = Variable { varStr::String, varTy::Fom } deriving (Show)
+data Define = Define { defScope::EntityMap, defBody::Fom, defArgs::[Variable] } deriving (Show)
+data Variable = Variable { varName::Ident, varTy::Fom } deriving (Show)
 data Entity = Entity { entName::Ident,
-    entType::Fom,
-    entLatex::Maybe EmbString,
-    entFunAttr::FunAttr,
-    entDef::Maybe Define,
-    entQtf::Quantifier,
-    entPred::Maybe Variable } deriving (Show)
+        entType::Fom,
+        entLatex::Maybe EmbString,
+        entFunAttr::FunAttr,
+        entQtf::Quantifier,
+        entDef::Maybe Define,
+        entPred::Maybe Variable } deriving (Show)
 
 type IdentWith a = (Ident, a)
 

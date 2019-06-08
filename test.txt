@@ -91,16 +91,6 @@ axiom (A, B, C: Prop) {
 
 def operator => (A, B: Prop): Prop { ~A | B }
 
-
-
-theorem (A, B, P, Q: Prop) {
-	((A => P) & (B => Q)) => ((A & B) => (P & Q))
-proof:
-	impl (A | A)
-}
-
-axiom (a, b: R) { x }
-
 theorem (A, B: Prop) {
 	(A => B) => (~A | B)
 proof:

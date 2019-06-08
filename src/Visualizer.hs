@@ -74,14 +74,16 @@ showFunFom omap fshow f args = if isAlpha (head f)
     where
     getArgNum h = maybe 2 opeArgNum $ M.lookup h omap
     getPre h = maybe 100 opePreceed $ M.lookup h omap
-    bshow fun@FunFom{} = let g = idStr $ funName fun in if length (show g) == 2 && getPre f > getPre (show g) 
+    bshow fun@FunFom{} = let g = idStr $ funIdent fun in if length (show g) == 2 && getPre f > getPre (show g) 
         then "(" ++ fshow omap fun ++ ")" 
         else fshow omap fun
     bshow fom = fshow omap fom
 
 showFom:: OpeMap -> Fom -> String
+showFom omap (SubTypeFom sub) = "subtype(" ++ showFom omap sub ++ ")"
+showFom omap (PredTypeFom id args) = idStr id ++ intercalate ", " (map (showFom omap) args)
 showFom omap (ACInsertFom list fun) = list ++ ".insert(" ++ showFom omap fun ++ ")"
-showFom omap (ACEachFom list src fun (UnaryLambda arg body)) = list ++ ".each[" ++ idStr (funName fun) ++ "](" ++ arg ++ "->" ++ showFom omap body ++ ")"
+showFom omap (ACEachFom list src fun (UnaryLambda arg body)) = list ++ ".each[" ++ idStr (funIdent fun) ++ "](" ++ arg ++ "->" ++ showFom omap body ++ ")"
 showFom omap (ACRestFom rest fun) = rest ++ ".rest(" ++ showFom omap fun ++ ")"
 showFom omap (PredFom vl ty) = showFom omap vl ++ "." ++ showFom omap ty
 showFom omap UnknownFom = "unknown"
@@ -90,24 +92,25 @@ showFom omap (StrFom id) = "\"" ++ idStr id ++ "\""
 showFom omap (NumFom (IdentInt _ num)) = show num
 showFom omap (VarFom id _) = idStr id
 showFom omap (CstFom id _) = idStr id
-showFom omap fun@FunFom{} = showFunFom omap showFom (idStr $ funName fun) (funArgs fun)
+showFom omap fun@FunFom{} = showFunFom omap showFom (idStr $ funIdent fun) (funArgs fun)
 showFom omap rew@Rewrite{} = "[" ++ showFom omap (rewOlder rew) ++ ", " ++ showFom omap (rewLater rew) ++ "]"
 showFom omap (FunTypeFom id args ret) = argStr ++ "->" ++ showFom omap ret where 
     argStr = case args of
         [arg] -> showFom omap arg
         _ -> "(" ++ intercalate ", " (map (showFom omap) args) ++ ")"
+showFom omap fom = error $ show fom
 
 -- showLatex:: OpeMap -> Fom -> String
 -- showLatex omap fun@FunFom{} = 
 
 showLatestFom:: OpeMap -> Fom -> String
 showLatestFom omap rew@Rewrite{} = showLatestFom omap (rewLater rew)
-showLatestFom omap fun@FunFom{} = showFunFom omap showLatestFom (idStr $ funName fun) (funArgs fun)
+showLatestFom omap fun@FunFom{} = showFunFom omap showLatestFom (idStr $ funIdent fun) (funArgs fun)
 showLatestFom omap e = showFom omap e
 
 showOldestFom:: OpeMap -> Fom -> String
 showOldestFom omap rew@Rewrite{} = showOldestFom omap (rewOlder rew)
-showOldestFom omap fun@FunFom{} = showFunFom omap showOldestFom (idStr $ funName fun) (funArgs fun)
+showOldestFom omap fun@FunFom{} = showFunFom omap showOldestFom (idStr $ funIdent fun) (funArgs fun)
 showOldestFom omap e = showFom omap e
 
 showFomAsRewrites:: OpeMap -> Fom -> String
@@ -116,7 +119,7 @@ showFomAsRewrites omap rew@Rewrite{} = "[" ++ intercalate ", " steps ++ "]" wher
     expandRewrite:: Fom -> [Fom]
     expandRewrite (Rewrite e a b) = expandRewrite b ++ expandRewrite a
     expandRewrite e = [e]
-showFomAsRewrites omap fun@FunFom{} = showFunFom omap showFomAsRewrites (idStr $ funName fun) (funArgs fun)
+showFomAsRewrites omap fun@FunFom{} = showFunFom omap showFomAsRewrites (idStr $ funIdent fun) (funArgs fun)
 showFomAsRewrites omap fom = showFom omap fom
 
 evalString:: Expr -> String
@@ -150,7 +153,7 @@ showLatex fom = fmap fst (showLatex fom) where
     showLatex:: Fom -> Analyzer (String, Operator)
     showLatex fun@FunFom{} = do
         omap <- fmap conOpe getContext
-        let name = idStr $ funName fun
+        let name = idStr $ funIdent fun
         let hostOpe = fromMaybe defaultOpe $ M.lookup name omap
         let bracket (str, ope) = if opePreceed hostOpe <= opePreceed ope then str else "\\\\left(" ++ str ++ "\\\\right)"
         mEnt <- lookupEnt name
