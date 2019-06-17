@@ -1,0 +1,20 @@
+
+undef R: Type
+
+undef operator <	: (R, R)->Prop
+undef operator >	: (R, R)->Prop
+undef operator <=	: (R, R)->Prop
+undef operator >=	: (R, R)->Prop
+
+undef operator +
+
+def dist(a: R, b: R) {
+    abs(a - b)
+}
+
+def Converge(a: R) [f: Seq] {
+	forall eps: PosR
+	exists n_0[eps]: N
+	forall n: N
+	n >= n_0 -> dist(a, f(n)) < eps
+}

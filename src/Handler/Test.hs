@@ -5,12 +5,12 @@ import Data.Maybe
 import qualified Data.Map as M
 import Control.Monad.Writer
 import Control.Monad.State
-import Parser
-import Library
-import Analyzer
-import Data
-import Visualizer
-import Rewriter
+import Utility
+import Kernel.Parser
+import Kernel.Analyzer
+import Kernel.Data
+import Kernel.Visualizer
+import Kernel.Rewriter
 
 showMessage:: Message -> String
 showMessage (Message id msg) = showIdent id ++ ":" ++ msg where

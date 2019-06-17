@@ -1,4 +1,4 @@
-module Visualizer where
+module Kernel.Visualizer where
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -10,8 +10,8 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Arrow
 import Control.Applicative
-import Library
-import Data
+import Utility
+import Kernel.Data
 
 class ToJson a where
     toJson:: a -> Analyzer String

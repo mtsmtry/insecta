@@ -1,4 +1,4 @@
-module Library where
+module Utility where
 import Data.Char
 import Data.List
 import Data.Maybe

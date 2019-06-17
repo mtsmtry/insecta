@@ -85,6 +85,8 @@ axiom (a, b: R) 	{ a <= b | b <= a >>= True }
 axiom (a, b, c: R) 	{ a + c <= b + c  >>= a <= b  }
 axiom (a, b: R) 	{ a >= 0 & b >= 0 => a * b >= 0 }
 
+axiom (A, B: Prop) { ~(A & B) >>= ~A | ~B }
+axiom (A, B: Prop) { ~(A | B) >>= ~A & ~B }
 axiom (A, B, C: Prop) {
 	(A | B) & C >>= A & C | B & C
 }
@@ -101,17 +103,18 @@ pred Min(A:> R) [x: A] {
 	x <= a
 }
 
-
 theorem (A, B, P, Q: Prop) {
 	((A => P) & (B => Q)) => ((A & B) => (P & Q))
 proof:
-	unfold (~A | P) & (~B | Q)
-	step ~A & ~B | ~A & Q | P & ~B | P & Q
-	impl ~A & ~B | ~A | ~B | P & Q
-	step ~((A | B) & (A & B)) | (P & Q)
-	impl ~(A & B) | (P & Q)
+	step (A => P) & (B => Q)
+	impl ((A & B => P) & (A & B => Q))
+	unfold (~(A & B) | P) & (~(A & B) | Q)
+	step ~(A & B) & Q | ~(A & B) | ~(A & B) & P
+	step ~(A & B) | (P & Q)
+	step ~(A & B) | (P & Q)
 	fold (A & B) => (P & Q)
 }
+
 
 theorem (A:> R) (a, b: Max(A)) {
 	a = b
@@ -389,7 +392,7 @@ proof:
 }
 
 # 40p 定義5
-def CauchySeq[f: Seq] {
+pred CauchySeq[f: Seq] {
 	forall eps: PosR, n, m: N
 	exists n_0[eps]: N
 	m >= n_0 & n >= n_0 -> dist(f(m), f(n)) < eps
