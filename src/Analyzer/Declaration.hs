@@ -202,3 +202,4 @@ buildProgram:: String -> ([Message], Context)
 buildProgram prg = (msg ++ msg', ctx)  where
     (msg, declas, omap) = parseProgram prg
     (msg', ctx, _) = analyze (mapM_ loadDecla declas) (newContext omap)
+

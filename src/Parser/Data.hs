@@ -48,23 +48,25 @@ showExprIdent (NumExpr (IdentInt pos num)) = Ident pos (show num)
 
 -- Program
 data DeclaBody = DeclaBody [IdentWith Statement] Expr deriving (Show)
-data Decla = AxiomDecla [[VarDec]] DeclaBody 
-    | TheoremDecla [[VarDec]] DeclaBody [IdentWith Statement]
-    | DefineDecla Ident [[VarDec]] Expr DeclaBody
-    | PredicateDecla Ident [[VarDec]] Ident Expr DeclaBody
-    | DataTypeDecla Ident Expr
-    | UndefDecla Ident Expr (Maybe EmbString)
-    | InfixDecla Bool Int Int Ident deriving (Show)
+
+data Decla =  AxiomDecla [[VarDec]] DeclaBody 
+            | TheoremDecla [[VarDec]] DeclaBody [IdentWith Statement]
+            | DefineDecla Ident [[VarDec]] Expr DeclaBody
+            | PredicateDecla Ident [[VarDec]] Ident Expr DeclaBody
+            | DataTypeDecla Ident Expr
+            | UndefDecla Ident Expr (Maybe EmbString)
+            | InfixDecla Bool Int Int Ident deriving (Show)
 
 data TypingKind = NormalTyping | ExtendTyping deriving (Eq, Show)
+
 data VarDec = VarDec { varDecKind::TypingKind, varDecId::Ident, varDecTy::Expr } deriving (Show)
 data QtfVarDec = QtfVarDec Quantifier VarDec deriving (Show)
 data VarDecSet = VarDecSet [Ident] TypingKind Expr deriving (Show)
 
 type IdentWith a = (Ident, a)
-data Quantifier = ForAll | Exists [Ident] deriving (Show)
 
 data Command = StepCmd | ImplCmd | UnfoldCmd | FoldCmd | TargetCmd | InsertCmd | BeginCmd | WrongCmd deriving (Eq, Show)
+
 data Statement = CmdStm (IdentWith Command) Expr
     | AssumeStm (IdentWith Command) Expr [IdentWith Statement]
     | ForkStm [[IdentWith Statement]]

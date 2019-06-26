@@ -1,27 +1,26 @@
 module Kernel.Rewriter where
-import Data.Maybe
 import Kernel.Data
 import Kernel.Basis
+import Common.Data
+import Common.Utility
+import qualified Data.Map as M
 
-normalizeACRewrite:: Fom -> Fom
+normalizeACRewrite:: RewFom -> RewFom
 normalizeACRewrite rew@(Rewrite res trg old) = case normalizeACRewrite trg of
     (Rewrite newRes new _)-> Rewrite newRes new rew
     new -> Rewrite res new old
-normalizeACRewrite fun@FunFom{} = if length (filter ((>1) . length) mArgs) >= 1 
-    then Rewrite ACNormalizeReason fun{funArgs=concat mArgs} fun
-    else fun{funArgs=nArgs}
+normalizeACRewrite (RewFom fun@FunFom{}) = if length (filter ((>1) . length) mArgs) >= 1 
+    then Rewrite ACNormalizeReason (RewFom fun{funArgs=concat mArgs}) fun
+    else RewFom fun{funArgs=nArgs}
     where 
     nArgs = map normalizeACRewrite $ funArgs fun
     mArgs = map applyArg nArgs
-    applyArg:: Fom -> [Fom]
+    applyArg:: RewFom -> [RewFom]
     applyArg rew@Rewrite{} = case latestFom rew of
-        rewFun@FunFom{} -> if funIdent fun == funIdent rewFun then funArgs rewFun else [rewFun]
+        (Fom rewFun@FunFom{}) -> if funId fun == funId rewFun then funArgs rewFun else [rewFun]
         latest -> [latest]
     applyArg arg = [arg]
 normalizeACRewrite fom = fom
-
-(<||>):: (a -> Maybe a) -> (a -> Maybe a) -> (a -> Maybe a)
-a <||> b = \m-> a m <|> b m
 
 extractArgs:: String -> Fom -> [Fom]
 extractArgs str fun@FunFom{} = if str == idStr (funIdent fun)
@@ -29,7 +28,7 @@ extractArgs str fun@FunFom{} = if str == idStr (funIdent fun)
     else [fun]
 extractArgs str fom = [fom]
 
-convert:: Fom -> Fom -> Analyzer Bool
+convert:: Fom -> Fom -> ProofAnalyzer Bool
 convert from to = if from == to 
     then return True
     else do
@@ -37,7 +36,7 @@ convert from to = if from == to
         toEnt <- lookupEnt (idStr $ showIdent to)
         fromMaybe (return False) $ cast to <$> fromEnt <*> toEnt
     where
-    cast:: Fom -> Entity -> Entity -> Analyzer Bool
+    cast:: Fom -> Symbol -> Symbol -> ProofAnalyzer Bool
     cast trg from to = case (entPred from, entPred to) of
         (Just pred, Nothing) -> return $ varName pred == entName to
         (Nothing, Just pred) -> do
@@ -46,9 +45,9 @@ convert from to = if from == to
                 Just (asg, rule) -> return True
                 Nothing -> return False
 
-insertSimp:: Ident -> Fom -> Fom -> Analyzer ()
+insertSimp:: Ident -> Fom -> Fom -> ProofAnalyzer ()
 insertSimp id a b = case (fomFunIdent a, fomFunIdent b) of
-    (Just fn, Just gn) -> insertSimpByName (idStr fn) (idStr gn)
+    (Just fn, Just gn) -> insertSimpByName fn gn
     (Just fn, Nothing) -> updateList $ \list-> let f = idStr fn in if f `elem` list then list else f:list
     (Nothing, Just gn) -> analyzeError id "定数は関数よりも常に簡単なため、定数を左辺に使うことはできません"
     (Nothing, Nothing) -> analyzeError id "全ての定数は等しい簡略性を持つため、定数を両端に持つ命題は無効です"
@@ -57,7 +56,7 @@ insertSimp id a b = case (fomFunIdent a, fomFunIdent b) of
     fomFunIdent (ACRestFom _ fun) = fomFunIdent fun
     fomFunIdent fun@FunFom{} = Just $ funIdent fun
     fomFunIdent _ = Nothing
-    insertSimpByName:: String -> String -> Analyzer ()
+    insertSimpByName:: Ident -> Ident -> ProofAnalyzer ()
     insertSimpByName f g = do
         m <- fmap conList getContext
         case (elemIndex f m, elemIndex g m) of
@@ -69,7 +68,7 @@ insertSimp id a b = case (fomFunIdent a, fomFunIdent b) of
         insertAt:: a -> Int -> [a] -> [a] 
         insertAt item idx xs = as ++ (item:bs) where (as, bs) = splitAt idx xs
 
-simplify:: Fom -> Analyzer Fom
+simplify:: Fom -> ProofAnalyzer Fom
 simplify fom = do
     simp <- fmap conSimp getContext
     list <- fmap conList getContext
@@ -88,8 +87,8 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
     applyWithSimp rules simp rew@(Rewrite res trg old) = applyWithSimp rules simp trg >>= \case
         (Rewrite newRes new _)-> Just $ Rewrite newRes new rew -- rewrite whole
         new -> Just $ Rewrite res new old                      -- rewrite argument
-    applyWithSimp rules simp fun@FunFom{} = if simp == fsimp then apply rules fun <|> rest else rest where
-        fsimp = fromMaybe (-1) $ elemIndex (idStr $ funIdent fun) simps
+    applyWithSimp rules simp (Fom fun@FunFom{}) = if simp == fsimp then apply rules fun <|> rest else rest where
+        fsimp = fromMaybe (-1) $ elemIndex (funId fun) simps
         rest = applyArgsOnce (applyWithSimp rules simp) fun
         apply:: [Rule] -> Fom -> Maybe Fom
         apply (rule:rules) trg = case unify (ruleBf rule) trg of
@@ -107,11 +106,11 @@ simplifyStepLoop simps m _fom = maybe _fom (simplifyStepLoop simps m) $ simplify
     simplifyStepAndNom:: Fom -> Maybe Fom
     simplifyStepAndNom = simplifyStep >=> Just . normalizeACRewrite
 
-type Derivater = (Fom, Fom) -> Analyzer (Maybe Fom)
+type Derivater = (Fom, Fom) -> ProofAnalyzer (Maybe Fom)
 
-applyDiff:: Derivater -> (Fom, Fom) -> Analyzer (Maybe Fom)
-applyDiff derivater pair@(bg@FunFom{}, gl@FunFom{}) = 
-    if funIdent bg == funIdent gl && length as == length bs
+applyDiff:: Derivater -> (Fom, Fom) -> ProofAnalyzer (Maybe Fom)
+applyDiff derivater pair@(Fom bg@FunFom{}, Fom gl@FunFom{}) = 
+    if funId bg == funId gl && length as == length bs
     then case num of
         0 -> return Nothing
         1 -> do
@@ -154,10 +153,10 @@ derivate = applyDiff derivateByRuleList where
             Nothing -> return Nothing
     derivateByRuleList _ = return Nothing
 
-checkUnfold:: EntityMap -> AssignMap -> Fom -> Fom -> Analyzer (Maybe Fom)
+checkUnfold:: SymbolMap -> AssignMap -> Fom -> Fom -> ProofAnalyzer (Maybe Fom)
 checkUnfold defMap argMag = checkUnfold where
-    checkUnfold:: Fom -> Fom -> Analyzer (Maybe Fom)
-    checkUnfold (VarFom (Ident _ name) ty) gl =
+    checkUnfold:: Fom -> Fom -> ProofAnalyzer (Maybe Fom)
+    checkUnfold (Fom (VarFom name ty)) gl =
         case (M.lookup name defMap, M.lookup name argMag) of
             (Just defEnt, _) -> do
                 mEnt <- lookupEnt name
@@ -166,13 +165,13 @@ checkUnfold defMap argMag = checkUnfold where
                     Nothing -> insertNewVarDec (entType defEnt) (entQtf defEnt) gl
             (_, Just arg) -> return $ if arg == gl then Just gl else Nothing
             (_, _) -> return Nothing
-    checkUnfold def@FunFom{} gl@FunFom{} = if funIdent def == funIdent gl 
+    checkUnfold (Fom def@FunFom{}) (Fom gl@FunFom{}) = if funIdent def == funIdent gl 
         then do
             mArgs <- mapM (uncurry checkUnfold) (zip (funArgs def) (funArgs gl))
             return $ (\x-> gl{funArgs=x}) <$> (conjMaybe $ mArgs)
         else return Nothing
     checkUnfold def gl = if def == gl then return $ Just gl else return Nothing
-    insertNewVarDec:: Fom -> Quantifier -> Fom -> Analyzer (Maybe Fom)
+    insertNewVarDec:: Fom -> Quantifier -> Fom -> ProofAnalyzer (Maybe Fom)
     insertNewVarDec ty ForAll (VarFom id _) = do
         insertEnt id ty
         return $ Just $ VarFom id ty
@@ -181,7 +180,7 @@ checkUnfold defMap argMag = checkUnfold where
     --     fun{funArgs=funArgs fun}
     insertNewVarDec ty ForAll fom = return $ Just fom
     insertNewVarDec ty qtf@Exists{} var@(VarFom id _) = do
-        insertEntMap id ty $ \ent-> ent{entQtf=qtf}
+        insertEntMap id ty -- $ \ent-> ent{entQtf=qtf}
         return $ Just $ VarFom id ty
     insertNewVarDec _ _ _ = return Nothing
 
@@ -202,42 +201,45 @@ derivateUnfold = applyDiff unfold where
 derivateFold:: Derivater
 derivateFold = applyDiff fold where
     fold:: Derivater
-    fold (bg, gl@FunFom{}) = do
-        mEnt <- lookupEnt (idStr $ funIdent gl)
+    fold (bg, Fom gl@FunFom{}) = do
+        mEnt <- lookupEnt (funId gl)
         case (mEnt, entDef <$> mEnt) of
             (Just ent, Just (Just def)) -> do
-                let argAsg = M.fromList $ zip (map (idStr. varName) $ defArgs def) (funArgs gl)
+                let argAsg = M.fromList $ zip (map varName $ defArgs def) (funArgs gl)
                 res <- checkUnfold (defScope def) argAsg (defBody def) bg
                 return $ maybe (Just gl) (const $ Just gl) res
             _ -> return Nothing
-    fold (bg, gl@(PredFom vl ty)) = return $ Just gl
+    fold (bg, Fom gl@(PredFom vl ty)) = return $ Just $ Fom gl
 
-mergeRewrite:: Fom -> Fom -> Maybe Fom
+instance Eq RewFom where
+    a == b = latestFom a == latestFom b
+
+mergeRewrite:: RewFom -> RewFom -> Maybe RewFom
 mergeRewrite = mergeRewrite Nothing where
-    mergeRewrite:: Maybe (Reason, Fom, Reason) -> Fom -> Fom -> Maybe Fom
+    mergeRewrite:: Maybe (Reason, RewFom, Reason) -> RewFom -> RewFom -> Maybe RewFom
     mergeRewrite junction former@(Rewrite r a b) latter@(Rewrite r' a' b') = case mergeRewrite junction a a' of
         Just res -> Just $ if hasRewrite res then app else fromMaybe app $ mergeRewrite (Just (r, a, r')) b b' 
             where app = appendStep r' (Rewrite r res b) b'
         Nothing  -> junction >>= \(jr, je, jr') -> Just $ appendStep jr' (Rewrite jr je former) latter 
     mergeRewrite _ former latter@(Rewrite r a b) = mergeRewrite Nothing former a >>= \x-> Just $ appendStep r x b
     mergeRewrite _ former@(Rewrite r a b) latter = mergeRewrite Nothing a latter >>= \x-> Just $ Rewrite r x b
-    mergeRewrite _ funA@FunFom{} funB@FunFom{} = if funIdent funA == funIdent funB
+    mergeRewrite _ (RewFom funA@FunFom{}) (RewFom funB@FunFom{}) = if funId funA == funId funB
         then do
             let zipFunc = if funAttr funA == ACFun then zipRandomFom else \x y-> Just $ zip x y
             argPairs <- zipFunc (funArgs funA) (funArgs funB)
             let merges = map (uncurry $ mergeRewrite Nothing) argPairs
             conjMerge <- conjMaybe merges
-            return funA{funArgs=conjMerge}
+            return $ RewFom funA{funArgs=conjMerge}
         else Nothing
-    mergeRewrite _ a b = if a == b then Just a else Nothing
-    appendStep:: Reason -> Fom -> Fom -> Fom
+    mergeRewrite _ fom@(RewFom a) (RewFom b) = if a == b then Just fom else Nothing
+    appendStep:: Reason -> RewFom -> RewFom -> RewFom
     appendStep juncRes trg (Rewrite r a b) = appendStep r (Rewrite juncRes a trg) b
     appendStep juncRes trg new = Rewrite juncRes new trg
-    hasRewrite:: Fom -> Bool
+    hasRewrite:: RewFom -> Bool
     hasRewrite Rewrite{} = True
-    hasRewrite fun@FunFom{} = all hasRewrite $ funArgs fun
+    hasRewrite (RewFom fun@FunFom{}) = all hasRewrite $ funArgs fun
     hasRewrite _ = False
-    zipRandomFom:: [Fom] -> [Fom] -> Maybe [(Fom, Fom)]
+    zipRandomFom:: [RewFom] -> [RewFom] -> Maybe [(RewFom, RewFom)]
     zipRandomFom = zipRandom (\x y-> latestFom x == latestFom y)
     zipRandom:: (a -> a -> Bool) -> [a] -> [a] -> Maybe [(a, a)]
     zipRandom equals as bs = if length as == length bs then zipRandom equals as bs else Nothing where
